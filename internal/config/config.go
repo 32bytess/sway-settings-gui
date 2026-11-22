@@ -1,7 +1,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -34,14 +36,22 @@ type Output struct {
 	Transform  string
 }
 
+// SystemConfigPath is sway's system-wide default config, used when the user
+// has no config of their own. A variable so tests can redirect it.
+var SystemConfigPath = "/etc/sway/config"
+
+// ConfigDInclude is added to a newly created main config so the files this
+// tool writes under config.d are loaded.
+const ConfigDInclude = "include ~/.config/sway/config.d/*"
+
 func SwayConfigDir() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".config", "sway")
 }
 
-func MainConfigPath() string  { return filepath.Join(SwayConfigDir(), "config") }
-func AppearancePath() string  { return filepath.Join(SwayConfigDir(), "config.d", "appearance.conf") }
-func OutputsPath() string     { return filepath.Join(SwayConfigDir(), "config.d", "outputs.conf") }
+func MainConfigPath() string { return filepath.Join(SwayConfigDir(), "config") }
+func AppearancePath() string { return filepath.Join(SwayConfigDir(), "config.d", "appearance.conf") }
+func OutputsPath() string    { return filepath.Join(SwayConfigDir(), "config.d", "outputs.conf") }
 
 func Load() (*Config, error) {
 	cfg := &Config{
@@ -70,9 +80,16 @@ func Load() (*Config, error) {
 }
 
 func (c *Config) loadMain() error {
-	data, err := os.ReadFile(MainConfigPath())
+	data, exists, err := readOptional(MainConfigPath())
 	if err != nil {
 		return err
+	}
+	if !exists {
+		// Sway itself falls back to the system config, so read defaults there.
+		data, _, err = readOptional(SystemConfigPath)
+		if err != nil {
+			return fmt.Errorf("reading system config: %w", err)
+		}
 	}
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
@@ -93,7 +110,7 @@ func (c *Config) loadMain() error {
 }
 
 func (c *Config) loadAppearance() error {
-	data, err := os.ReadFile(AppearancePath())
+	data, _, err := readOptional(AppearancePath())
 	if err != nil {
 		return err
 	}
@@ -131,7 +148,7 @@ func (c *Config) loadAppearance() error {
 }
 
 func (c *Config) loadOutputs() error {
-	data, err := os.ReadFile(OutputsPath())
+	data, _, err := readOptional(OutputsPath())
 	if err != nil {
 		return err
 	}
@@ -158,26 +175,76 @@ type replacement struct {
 	val string
 }
 
-func replaceInFile(path string, replacements []replacement) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
+// readOptional reads path, reporting exists=false (and no error) when the
+// file does not exist. Any other error is returned.
+func readOptional(path string) (data []byte, exists bool, err error) {
+	data, err = os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, false, nil
 	}
-	lines := strings.Split(string(data), "\n")
+	if err != nil {
+		return nil, false, err
+	}
+	return data, true, nil
+}
+
+// splitLines splits content into lines, dropping the empty element produced
+// by a trailing newline.
+func splitLines(content string) []string {
+	if content == "" {
+		return nil
+	}
+	return strings.Split(strings.TrimSuffix(content, "\n"), "\n")
+}
+
+func leadingIndent(line string) string {
+	return line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+}
+
+// applyReplacements rewrites every non-comment line matching a replacement
+// and returns the values of replacements that matched no line.
+func applyReplacements(lines []string, replacements []replacement) []string {
+	matched := make([]bool, len(replacements))
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		for _, r := range replacements {
+		for j, r := range replacements {
 			if r.re.MatchString(trimmed) {
-				indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
-				lines[i] = indent + r.val
+				lines[i] = leadingIndent(line) + r.val
+				matched[j] = true
 				break
 			}
 		}
 	}
-	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644)
+	var missing []string
+	for j, r := range replacements {
+		if !matched[j] {
+			missing = append(missing, r.val)
+		}
+	}
+	return missing
+}
+
+// writeLines writes lines to path, creating parent directories as needed.
+func writeLines(path string, lines []string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0644)
+}
+
+// replaceInFile updates matching lines in path, appending settings that are
+// not present. A missing file is created.
+func replaceInFile(path string, replacements []replacement) error {
+	data, _, err := readOptional(path)
+	if err != nil {
+		return err
+	}
+	lines := splitLines(string(data))
+	lines = append(lines, applyReplacements(lines, replacements)...)
+	return writeLines(path, lines)
 }
 
 func (c *Config) Save() error {
@@ -194,12 +261,32 @@ func (c *Config) Save() error {
 }
 
 func (c *Config) saveMain() error {
-	return replaceInFile(MainConfigPath(), []replacement{
+	path := MainConfigPath()
+	data, exists, err := readOptional(path)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		// Seed from the system default so a new user config keeps sway's
+		// default bindings instead of containing only our variables.
+		data, _, err = readOptional(SystemConfigPath)
+		if err != nil {
+			return fmt.Errorf("reading system config: %w", err)
+		}
+	}
+	lines := splitLines(string(data))
+	missing := applyReplacements(lines, []replacement{
 		{regexp.MustCompile(`^set \$mod `), fmt.Sprintf("set $mod %s", c.ModKey)},
 		{regexp.MustCompile(`^set \$term `), fmt.Sprintf("set $term %s", c.Terminal)},
 		{regexp.MustCompile(`^set \$menu `), fmt.Sprintf("set $menu %s", c.Menu)},
 		{regexp.MustCompile(`^set \$opacity `), fmt.Sprintf("set $opacity %g", c.Opacity)},
 	})
+	// Variables must be defined before use, so missing ones go at the top.
+	lines = append(missing, lines...)
+	if !exists {
+		lines = append(lines, "", ConfigDInclude)
+	}
+	return writeLines(path, lines)
 }
 
 func (c *Config) saveAppearance() error {
@@ -220,13 +307,22 @@ func (c *Config) saveAppearance() error {
 	})
 }
 
+func (o Output) line() string {
+	l := fmt.Sprintf("output %s resolution %s position %s", o.Name, o.Resolution, o.Position)
+	if o.Transform != "" {
+		l += " transform " + o.Transform
+	}
+	return l
+}
+
 func (c *Config) saveOutputs() error {
-	data, err := os.ReadFile(OutputsPath())
+	data, _, err := readOptional(OutputsPath())
 	if err != nil {
 		return err
 	}
-	lines := strings.Split(string(data), "\n")
+	lines := splitLines(string(data))
 	nameRe := regexp.MustCompile(`^output (\S+) resolution`)
+	written := make(map[string]bool)
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "#") {
@@ -237,16 +333,16 @@ func (c *Config) saveOutputs() error {
 			continue
 		}
 		for _, out := range c.Outputs {
-			if out.Name != m[1] {
-				continue
+			if out.Name == m[1] {
+				lines[i] = leadingIndent(line) + out.line()
+				written[out.Name] = true
 			}
-			newLine := fmt.Sprintf("output %s resolution %s position %s", out.Name, out.Resolution, out.Position)
-			if out.Transform != "" {
-				newLine += " transform " + out.Transform
-			}
-			indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
-			lines[i] = indent + newLine
 		}
 	}
-	return os.WriteFile(OutputsPath(), []byte(strings.Join(lines, "\n")), 0644)
+	for _, out := range c.Outputs {
+		if !written[out.Name] {
+			lines = append(lines, out.line())
+		}
+	}
+	return writeLines(OutputsPath(), lines)
 }
