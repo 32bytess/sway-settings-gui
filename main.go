@@ -25,6 +25,12 @@ func main() {
 		cfg = &config.Config{ModKey: "Mod4", Terminal: "kitty", Opacity: 1.0}
 	}
 
+	swayFX, err := config.DetectSwayFX()
+	if err != nil {
+		dialog.ShowError(fmt.Errorf("detecting SwayFX (SwayFX settings disabled): %w", err), w)
+	}
+	cfg.SwayFX = swayFX
+
 	tabs := container.NewAppTabs(
 		container.NewTabItem("Variables", ui.MakeVariablesTab(cfg)),
 		container.NewTabItem("Appearance", ui.MakeAppearanceTab(cfg)),

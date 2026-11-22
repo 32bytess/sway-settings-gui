@@ -35,22 +35,29 @@ func MakeAppearanceTab(cfg *config.Config) fyne.CanvasObject {
 		return container.NewGridWithColumns(3, widget.NewLabel(label), s, lbl)
 	}
 
-	blurCheck := widget.NewCheck("Enable blur (SwayFX)", func(v bool) { cfg.BlurEnabled = v })
-	blurCheck.SetChecked(cfg.BlurEnabled)
-
-	return container.NewVBox(
+	box := container.NewVBox(
 		widget.NewLabelWithStyle("Gaps & Borders", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		intRow("Gaps inner (px)", 0, 50, func() int { return cfg.GapsInner }, func(v int) { cfg.GapsInner = v }),
 		intRow("Gaps outer (px)", 0, 50, func() int { return cfg.GapsOuter }, func(v int) { cfg.GapsOuter = v }),
-		intRow("Corner radius (px)", 0, 30, func() int { return cfg.CornerRadius }, func(v int) { cfg.CornerRadius = v }),
 		intRow("Border width (px)", 0, 5, func() int { return cfg.BorderSize }, func(v int) { cfg.BorderSize = v }),
-		widget.NewSeparator(),
-		widget.NewLabelWithStyle("Blur (SwayFX)", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		blurCheck,
-		intRow("Blur passes", 1, 10, func() int { return cfg.BlurPasses }, func(v int) { cfg.BlurPasses = v }),
-		intRow("Blur radius", 1, 20, func() int { return cfg.BlurRadius }, func(v int) { cfg.BlurRadius = v }),
-		widget.NewSeparator(),
-		widget.NewLabelWithStyle("Inactive Windows", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		floatRow("Dim inactive", 0, 0.5, 0.05, func() float64 { return cfg.DimInactive }, func(v float64) { cfg.DimInactive = v }),
 	)
+	if !cfg.SwayFX {
+		box.Add(widget.NewSeparator())
+		box.Add(widget.NewLabel("Corner radius, blur and dimming need SwayFX (not detected)."))
+		return box
+	}
+
+	blurCheck := widget.NewCheck("Enable blur", func(v bool) { cfg.BlurEnabled = v })
+	blurCheck.SetChecked(cfg.BlurEnabled)
+
+	box.Add(intRow("Corner radius (px)", 0, 30, func() int { return cfg.CornerRadius }, func(v int) { cfg.CornerRadius = v }))
+	box.Add(widget.NewSeparator())
+	box.Add(widget.NewLabelWithStyle("Blur", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+	box.Add(blurCheck)
+	box.Add(intRow("Blur passes", 1, 10, func() int { return cfg.BlurPasses }, func(v int) { cfg.BlurPasses = v }))
+	box.Add(intRow("Blur radius", 1, 20, func() int { return cfg.BlurRadius }, func(v int) { cfg.BlurRadius = v }))
+	box.Add(widget.NewSeparator())
+	box.Add(widget.NewLabelWithStyle("Inactive Windows", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+	box.Add(floatRow("Dim inactive", 0, 0.5, 0.05, func() float64 { return cfg.DimInactive }, func(v float64) { cfg.DimInactive = v }))
+	return box
 }

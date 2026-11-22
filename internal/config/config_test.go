@@ -86,6 +86,7 @@ func TestSaveCreatesDirsAndFiles(t *testing.T) {
 	cfg.Terminal = "foot"
 	cfg.Menu = "wofi --show drun"
 	cfg.GapsInner = 7
+	cfg.SwayFX = true
 	cfg.BlurEnabled = false
 	cfg.Outputs = []Output{{Name: "DP-1", Resolution: "2560x1440", Position: "0,0", Transform: "90"}}
 
@@ -161,6 +162,7 @@ func TestSaveAddsMissingSettingsToExistingFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg.Menu = "fuzzel"
+	cfg.SwayFX = true
 	cfg.BlurRadius = 12
 	cfg.Outputs = append(cfg.Outputs, Output{Name: "DP-2", Resolution: "1920x1080", Position: "1920,0"})
 	if err := cfg.Save(); err != nil {
@@ -222,4 +224,68 @@ func TestMainConfigPathPrefersLXQtConfig(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, ".config", "sway", "config")); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("sway/config should not be created when LXQt config is used, stat err: %v", err)
 	}
+}
+
+func TestIsSwayFX(t *testing.T) {
+	cases := map[string]bool{
+		"sway version 1.12":                         false,
+		"swayfx version 0.5.3 (based on sway 1.11)": true,
+		"SwayFX version 0.4":                        true,
+	}
+	for out, want := range cases {
+		if got := isSwayFX(out); got != want {
+			t.Errorf("isSwayFX(%q) = %v, want %v", out, got, want)
+		}
+	}
+}
+
+func TestDetectSwayFXSurfacesCommandError(t *testing.T) {
+	orig := swayVersion
+	swayVersion = func() (string, error) { return "", errors.New("sway not found") }
+	t.Cleanup(func() { swayVersion = orig })
+	if _, err := DetectSwayFX(); err == nil {
+		t.Fatal("expected error when sway --version fails")
+	}
+}
+
+func TestSavePlainSwayRemovesSwayFXSettings(t *testing.T) {
+	setupHome(t)
+	if err := os.MkdirAll(filepath.Dir(AppearancePath()), 0755); err != nil {
+		t.Fatal(err)
+	}
+	existing := "# blur enable\ngaps inner 4\ncorner_radius 15\nblur enable\nblur_passes 2\nblur_radius 8\ndefault_dim_inactive 0.10\n"
+	if err := os.WriteFile(AppearancePath(), []byte(existing), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.SwayFX = false
+	cfg.GapsInner = 6
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	app := readFile(t, AppearancePath())
+	mustContain(t, app, "gaps inner 6")
+	mustContain(t, app, "# blur enable")
+	for _, bad := range []string{"\ncorner_radius", "\nblur enable", "blur_passes", "blur_radius", "default_dim_inactive"} {
+		if strings.Contains(app, bad) {
+			t.Fatalf("plain sway config should not contain %q:\n%s", bad, app)
+		}
+	}
+}
+
+func TestSaveRoundsOpacity(t *testing.T) {
+	setupHome(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Opacity = 0.9000000000000001
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	main := readFile(t, MainConfigPath())
+	mustContain(t, main, "set $opacity 0.9\n")
 }

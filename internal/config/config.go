@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -27,6 +29,34 @@ type Config struct {
 	DimInactive  float64
 
 	Outputs []Output
+
+	// SwayFX reports whether the compositor accepts SwayFX-only commands
+	// (corner_radius, blur*, default_dim_inactive). When false they are
+	// neither written nor kept, since plain sway rejects them.
+	SwayFX bool
+}
+
+// swayVersion returns the output of `sway --version`. A variable so tests
+// can replace it.
+var swayVersion = func() (string, error) {
+	out, err := exec.Command("sway", "--version").CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("sway --version: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return string(out), nil
+}
+
+func isSwayFX(versionOutput string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(versionOutput)), "swayfx")
+}
+
+// DetectSwayFX reports whether the installed sway binary is SwayFX.
+func DetectSwayFX() (bool, error) {
+	out, err := swayVersion()
+	if err != nil {
+		return false, err
+	}
+	return isSwayFX(out), nil
 }
 
 type Output struct {
@@ -294,7 +324,7 @@ func (c *Config) saveMain() error {
 		{regexp.MustCompile(`^set \$mod `), fmt.Sprintf("set $mod %s", c.ModKey)},
 		{regexp.MustCompile(`^set \$term `), fmt.Sprintf("set $term %s", c.Terminal)},
 		{regexp.MustCompile(`^set \$menu `), fmt.Sprintf("set $menu %s", c.Menu)},
-		{regexp.MustCompile(`^set \$opacity `), fmt.Sprintf("set $opacity %g", c.Opacity)},
+		{regexp.MustCompile(`^set \$opacity `), "set $opacity " + strconv.FormatFloat(math.Round(c.Opacity*100)/100, 'f', -1, 64)},
 	})
 	// Variables must be defined before use, so missing ones go at the top.
 	lines = append(missing, lines...)
@@ -309,17 +339,44 @@ func (c *Config) saveAppearance() error {
 	if !c.BlurEnabled {
 		blurVal = "disable"
 	}
-	return replaceInFile(AppearancePath(), []replacement{
+	common := []replacement{
 		{regexp.MustCompile(`^gaps inner \d+`), fmt.Sprintf("gaps inner %d", c.GapsInner)},
 		{regexp.MustCompile(`^gaps outer \d+`), fmt.Sprintf("gaps outer %d", c.GapsOuter)},
-		{regexp.MustCompile(`^corner_radius \d+`), fmt.Sprintf("corner_radius %d", c.CornerRadius)},
 		{regexp.MustCompile(`^default_border pixel \d+`), fmt.Sprintf("default_border pixel %d", c.BorderSize)},
 		{regexp.MustCompile(`^default_floating_border pixel \d+`), fmt.Sprintf("default_floating_border pixel %d", c.BorderSize)},
+	}
+	swayFX := []replacement{
+		{regexp.MustCompile(`^corner_radius \d+`), fmt.Sprintf("corner_radius %d", c.CornerRadius)},
 		{regexp.MustCompile(`^blur (enable|disable)$`), fmt.Sprintf("blur %s", blurVal)},
 		{regexp.MustCompile(`^blur_passes \d+`), fmt.Sprintf("blur_passes %d", c.BlurPasses)},
 		{regexp.MustCompile(`^blur_radius \d+`), fmt.Sprintf("blur_radius %d", c.BlurRadius)},
 		{regexp.MustCompile(`^default_dim_inactive [0-9.]+`), fmt.Sprintf("default_dim_inactive %.2f", c.DimInactive)},
-	})
+	}
+	if c.SwayFX {
+		return replaceInFile(AppearancePath(), append(common, swayFX...))
+	}
+
+	data, _, err := readOptional(AppearancePath())
+	if err != nil {
+		return err
+	}
+	var lines []string
+	for _, line := range splitLines(string(data)) {
+		if !matchesAny(strings.TrimSpace(line), swayFX) {
+			lines = append(lines, line)
+		}
+	}
+	lines = append(lines, applyReplacements(lines, common)...)
+	return writeLines(AppearancePath(), lines)
+}
+
+func matchesAny(trimmed string, replacements []replacement) bool {
+	for _, r := range replacements {
+		if r.re.MatchString(trimmed) {
+			return true
+		}
+	}
+	return false
 }
 
 func (o Output) line() string {
