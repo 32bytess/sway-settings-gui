@@ -1,6 +1,8 @@
 package config
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -182,4 +184,42 @@ func TestSaveAddsMissingSettingsToExistingFiles(t *testing.T) {
 	outs := readFile(t, OutputsPath())
 	mustContain(t, outs, "output HDMI-A-1 resolution 1920x1080 position 0,0")
 	mustContain(t, outs, "output DP-2 resolution 1920x1080 position 1920,0")
+}
+
+func TestMainConfigPathDefaultsToSwayConfig(t *testing.T) {
+	home := setupHome(t)
+	want := filepath.Join(home, ".config", "sway", "config")
+	if got := MainConfigPath(); got != want {
+		t.Fatalf("MainConfigPath() = %q, want %q", got, want)
+	}
+}
+
+func TestMainConfigPathPrefersLXQtConfig(t *testing.T) {
+	home := setupHome(t)
+	lxqt := filepath.Join(home, ".config", "lxqt", "wayland", "lxqt-sway.config")
+	if err := os.MkdirAll(filepath.Dir(lxqt), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(lxqt, []byte("set $mod Mod1\nset $term qterminal\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if got := MainConfigPath(); got != lxqt {
+		t.Fatalf("MainConfigPath() = %q, want %q", got, lxqt)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ModKey != "Mod1" || cfg.Terminal != "qterminal" {
+		t.Fatalf("expected values from LXQt config, got mod=%q term=%q", cfg.ModKey, cfg.Terminal)
+	}
+	cfg.Terminal = "foot"
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	mustContain(t, readFile(t, lxqt), "set $term foot")
+	if _, err := os.Stat(filepath.Join(home, ".config", "sway", "config")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("sway/config should not be created when LXQt config is used, stat err: %v", err)
+	}
 }

@@ -49,7 +49,22 @@ func SwayConfigDir() string {
 	return filepath.Join(home, ".config", "sway")
 }
 
-func MainConfigPath() string { return filepath.Join(SwayConfigDir(), "config") }
+// LXQtConfigPath is the sway config an LXQt Wayland session loads instead of
+// ~/.config/sway/config.
+func LXQtConfigPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "lxqt", "wayland", "lxqt-sway.config")
+}
+
+// MainConfigPath returns the LXQt sway config when it exists, since that is
+// the file the running session reads, and ~/.config/sway/config otherwise.
+func MainConfigPath() string {
+	if info, err := os.Stat(LXQtConfigPath()); err == nil && info.Mode().IsRegular() {
+		return LXQtConfigPath()
+	}
+	return filepath.Join(SwayConfigDir(), "config")
+}
+
 func AppearancePath() string { return filepath.Join(SwayConfigDir(), "config.d", "appearance.conf") }
 func OutputsPath() string    { return filepath.Join(SwayConfigDir(), "config.d", "outputs.conf") }
 
