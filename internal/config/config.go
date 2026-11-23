@@ -91,6 +91,9 @@ type Config struct {
 	// Bar is the swaybar managed in bar.conf.
 	Bar Bar
 
+	// Idle is swayidle/swaylock, managed via idle.conf and idle.sh.
+	Idle Idle
+
 	// BorderStyle and FloatingBorderStyle are normal, pixel or none; ""
 	// keeps whatever style the config already uses.
 	BorderStyle         string
@@ -193,6 +196,7 @@ func Default() *Config {
 	cfg.Behavior = map[string]string{}
 	cfg.vars = map[string]string{}
 	cfg.Bar = newBar()
+	cfg.Idle = defaultIdle()
 	return cfg
 }
 
@@ -225,6 +229,9 @@ func Load() (*Config, error) {
 	}
 	if err := cfg.loadBar(); err != nil {
 		return nil, fmt.Errorf("bar: %w", err)
+	}
+	if err := cfg.loadIdle(); err != nil {
+		return nil, fmt.Errorf("idle: %w", err)
 	}
 	cfg.markWallpaperSaved()
 	cfg.inputBaseline = copyInputMaps(cfg.Input)
@@ -492,6 +499,9 @@ func (c *Config) validate() error {
 	if err := c.validateBar(); err != nil {
 		return err
 	}
+	if err := c.validateIdle(); err != nil {
+		return err
+	}
 	if !c.SwayFX {
 		return nil
 	}
@@ -539,6 +549,9 @@ func (c *Config) Save() error {
 	}
 	if err := c.saveBar(); err != nil {
 		return fmt.Errorf("bar: %w", err)
+	}
+	if err := c.saveIdle(); err != nil {
+		return fmt.Errorf("idle: %w", err)
 	}
 	c.markWallpaperSaved()
 	c.inputBaseline = copyInputMaps(c.Input)

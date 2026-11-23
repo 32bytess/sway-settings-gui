@@ -58,6 +58,7 @@ func main() {
 		container.NewTabItem("Rules", ui.MakeRulesTab(cfg, w)),
 		container.NewTabItem("Startup", ui.MakeStartupTab(cfg, w)),
 		container.NewTabItem("Bar", ui.MakeBarTab(cfg, w)),
+		container.NewTabItem("Idle", ui.MakeIdleTab(cfg, w)),
 	)
 
 	saveBtn := widget.NewButton("Save & Reload Sway", func() {
@@ -75,6 +76,12 @@ func main() {
 			return
 		}
 		msg := "Configuration saved and Sway reloaded."
+		if !cfg.Idle.Enabled {
+			if err := config.StopIdle(); err != nil {
+				dialog.ShowError(fmt.Errorf("saved and reloaded, but stopping swayidle failed: %w", err), w)
+				return
+			}
+		}
 		if wallpaperChanged && cfg.LXQtDesktop && cfg.Wallpaper != "" {
 			if err := config.SyncLXQtWallpaper(cfg.Wallpaper, cfg.WallpaperMode); err != nil {
 				dialog.ShowError(fmt.Errorf("saved and reloaded, but the LXQt desktop wallpaper was not changed: %w", err), w)
