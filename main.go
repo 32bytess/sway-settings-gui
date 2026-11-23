@@ -17,7 +17,8 @@ import (
 func main() {
 	a := app.NewWithID("com.github.32bytess.sway-settings-gui")
 	w := a.NewWindow("Sway Settings")
-	w.Resize(fyne.NewSize(620, 520))
+	// Wider than before to make room for the tab sidebar.
+	w.Resize(fyne.NewSize(780, 600))
 	showSettings(a, w, 0)
 	w.ShowAndRun()
 }
@@ -78,7 +79,7 @@ func showSettings(a fyne.App, w fyne.Window, selected int) {
 
 	// Ordered from basics, to hardware, to look, to behaviour, to session.
 	tabs := container.NewAppTabs(
-		container.NewTabItem("Variables", ui.MakeVariablesTab(cfg, w)),
+		container.NewTabItem("General", ui.MakeGeneralTab(cfg, w)),
 		container.NewTabItem("Outputs", ui.MakeOutputsTab(cfg, w)),
 		container.NewTabItem("Input", ui.MakeInputTab(cfg, l.inputTypes, l.inputDevices, l.inputDevErr)),
 		container.NewTabItem("Appearance", container.NewVScroll(ui.MakeAppearanceTab(cfg, w))),
@@ -91,6 +92,8 @@ func showSettings(a fyne.App, w fyne.Window, selected int) {
 		container.NewTabItem("Bar", ui.MakeBarTab(cfg, w)),
 		container.NewTabItem("Idle", ui.MakeIdleTab(cfg, w)),
 	)
+	// A sidebar fits all twelve tabs; across the top some would be hidden.
+	tabs.SetTabLocation(container.TabLocationLeading)
 	if selected >= 0 && selected < len(tabs.Items) {
 		tabs.SelectIndex(selected)
 	}

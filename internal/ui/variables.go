@@ -70,7 +70,7 @@ func pickFile(w fyne.Window, startDir string, exts []string, onPick func(path st
 	d.Show()
 }
 
-func MakeVariablesTab(cfg *config.Config, w fyne.Window) fyne.CanvasObject {
+func MakeGeneralTab(cfg *config.Config, w fyne.Window) fyne.CanvasObject {
 	modSelect := widget.NewSelect([]string{"Mod4 (Super)", "Mod1 (Alt)"}, func(val string) {
 		if val == "Mod1 (Alt)" {
 			cfg.ModKey = "Mod1"
