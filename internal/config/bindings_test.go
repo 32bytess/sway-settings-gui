@@ -53,6 +53,9 @@ func TestLoadParsesDefaultModeBindingsRaw(t *testing.T) {
 	cfg := loadBindings(t)
 	var combos []string
 	for _, e := range cfg.Bindings {
+		if e.Mode != "" {
+			continue
+		}
 		combos = append(combos, e.Combo)
 		if e.Status() != StatusMain {
 			t.Fatalf("%s status = %s", e.Combo, e.Status())
@@ -60,7 +63,7 @@ func TestLoadParsesDefaultModeBindingsRaw(t *testing.T) {
 	}
 	want := "$mod+Return|$mod+Shift+e|$mod+$left|$mod+r|XF86AudioMute|$mod+x"
 	if got := strings.Join(combos, "|"); got != want {
-		t.Fatalf("combos = %s, want %s (mode block bindings must be skipped)", got, want)
+		t.Fatalf("default-mode combos = %s, want %s", got, want)
 	}
 	if c := cfg.Bindings[findBinding(t, cfg, "$mod+Shift+e")].Command; c != exitCmd {
 		t.Fatalf("exit command not kept raw:\n%s", c)
@@ -262,5 +265,111 @@ func TestCheckConfigReportsErrors(t *testing.T) {
 	swayCheck = func(path string) (string, error) { return "", errors.New("sway not found") }
 	if err := CheckConfig(); err == nil {
 		t.Fatal("expected error when sway -C can't run")
+	}
+}
+
+func findModeBinding(t *testing.T, cfg *Config, mode, combo string) int {
+	t.Helper()
+	for i, e := range cfg.Bindings {
+		if e.Mode == mode && e.Combo == combo {
+			return i
+		}
+	}
+	t.Fatalf("binding %q in mode %q not found", combo, mode)
+	return -1
+}
+
+func TestLoadParsesModeBindings(t *testing.T) {
+	cfg := loadBindings(t)
+	left := cfg.Bindings[findModeBinding(t, cfg, "resize", "Left")]
+	if left.Command != "resize shrink width 10px" || left.Status() != StatusMain {
+		t.Fatalf("resize Left = %+v", left)
+	}
+	ret := cfg.Bindings[findModeBinding(t, cfg, "resize", "Return")]
+	if ret.Command != `mode "default"` {
+		t.Fatalf("resize Return = %+v", ret)
+	}
+	if got := cfg.Modes(); strings.Join(got, "|") != "|resize" {
+		t.Fatalf("Modes() = %q", got)
+	}
+}
+
+func TestModeBindingOverrideRemoveAndAdd(t *testing.T) {
+	cfg := loadBindings(t)
+	i := findModeBinding(t, cfg, "resize", "Left")
+	b := cfg.Bindings[i].Binding
+	b.Command = "resize shrink width 20px"
+	if err := cfg.UpdateBinding(i, b); err != nil {
+		t.Fatal(err)
+	}
+	cfg.RemoveBinding(findModeBinding(t, cfg, "resize", "Return"))
+	if err := cfg.AddBinding(Binding{Kind: "bindsym", Mode: "resize", Combo: "h", Command: "resize shrink width 10px"}); err != nil {
+		t.Fatal(err)
+	}
+	// Same keys in a different mode don't collide.
+	if err := cfg.AddBinding(Binding{Kind: "bindsym", Mode: "resize", Combo: "$mod+Return", Command: "nop"}); err != nil {
+		t.Fatalf("mode binding should not collide with default-mode $mod+Return: %v", err)
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	want := `mode "resize" {
+    unbindsym Return
+    bindsym --no-warn Left resize shrink width 20px
+    bindsym h resize shrink width 10px
+    bindsym $mod+Return nop
+}
+`
+	if got := readFile(t, BindingsPath()); got != want {
+		t.Fatalf("bindings.conf =\n%s\nwant\n%s", got, want)
+	}
+
+	again, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	statuses := map[string]string{}
+	for _, e := range again.Bindings {
+		if e.Mode == "resize" {
+			statuses[e.Combo] = e.Status()
+		}
+	}
+	if statuses["Left"] != StatusOverridden || statuses["Return"] != StatusRemoved || statuses["h"] != StatusAdded {
+		t.Fatalf("reloaded statuses = %v", statuses)
+	}
+	if err := again.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, BindingsPath()); got != want {
+		t.Fatalf("round trip changed bindings.conf:\n%s", got)
+	}
+}
+
+func TestDefaultAndModeBindingsTogether(t *testing.T) {
+	cfg := loadBindings(t)
+	b := cfg.Bindings[findBinding(t, cfg, "$mod+Return")].Binding
+	b.Command = "exec foot"
+	if err := cfg.UpdateBinding(findBinding(t, cfg, "$mod+Return"), b); err != nil {
+		t.Fatal(err)
+	}
+	cfg.RemoveBinding(findModeBinding(t, cfg, "resize", "Left"))
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	want := "bindsym --no-warn $mod+Return exec foot\nmode \"resize\" {\n    unbindsym Left\n}\n"
+	if got := readFile(t, BindingsPath()); got != want {
+		t.Fatalf("bindings.conf = %q, want %q", got, want)
+	}
+}
+
+func TestModeNameValidation(t *testing.T) {
+	cfg := loadBindings(t)
+	for _, mode := range []string{`bad"name`, "a\nb"} {
+		if err := cfg.AddBinding(Binding{Kind: "bindsym", Mode: mode, Combo: "x", Command: "nop"}); err == nil {
+			t.Errorf("expected error for mode %q", mode)
+		}
+	}
+	if err := cfg.AddBinding(Binding{Kind: "bindsym", Mode: "System (l) lock", Combo: "l", Command: "exec swaylock"}); err != nil {
+		t.Errorf("mode names with spaces and parentheses are valid: %v", err)
 	}
 }

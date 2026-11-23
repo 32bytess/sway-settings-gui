@@ -15,6 +15,7 @@ func BindingsPath() string { return filepath.Join(SwayConfigDir(), "config.d", "
 // Binding is one bindsym/bindcode. Combo and Command are kept exactly as
 // written (quotes, escapes and $variables intact).
 type Binding struct {
+	Mode    string   // "" for the default mode, else e.g. "resize"
 	Kind    string   // bindsym or bindcode
 	Flags   []string // e.g. --locked; --no-warn is not kept
 	Combo   string   // e.g. $mod+Shift+e
@@ -53,6 +54,7 @@ var (
 	unbindRe = regexp.MustCompile(`^(unbindsym|unbindcode)((?:\s+--\S+)*)\s+(\S+)$`)
 	comboRe  = regexp.MustCompile(`^[A-Za-z0-9_$:+-]+$`)
 	setRe    = regexp.MustCompile(`^set\s+\$(\S+)\s+(.+)$`)
+	modeRe   = regexp.MustCompile(`^mode\s+(?:--pango_markup\s+)?("[^"]*"|\S+)\s*\{$`)
 )
 
 var allowedBindFlags = map[string]bool{
@@ -86,6 +88,9 @@ func (b Binding) unbindLine() string {
 }
 
 func validateBinding(b Binding) error {
+	if hasControlChars(b.Mode) || strings.Contains(b.Mode, `"`) {
+		return fmt.Errorf("mode name %q may not contain quotes or control characters", b.Mode)
+	}
 	if b.Kind != "bindsym" && b.Kind != "bindcode" {
 		return fmt.Errorf("binding type %q must be bindsym or bindcode", b.Kind)
 	}
@@ -192,21 +197,86 @@ func (c *Config) bindingKey(b Binding) string {
 	sort.Strings(mods)
 	flags := append([]string(nil), b.Flags...)
 	sort.Strings(flags)
-	return b.Kind + "|" + strings.Join(flags, " ") + "|" + strings.Join(mods, "+") + "+" + key
+	return b.Mode + "|" + b.Kind + "|" + strings.Join(flags, " ") + "|" + strings.Join(mods, "+") + "+" + key
 }
 
-// readMainBindings records variables and default-mode bindings from the
-// main config.
+// scanBindings walks a file's logical lines, calling onBind for bindsym,
+// bindcode and unbind lines at the top level or directly inside a mode
+// block, and onOther for every other line with its mode ("" at top level)
+// and whether it opens or closes a mode block. Other blocks (bar { },
+// input { }) are skipped.
+func scanBindings(lines []string, onLine func(mode, line string, start int, kind lineKind)) {
+	logical, starts := logicalLines(lines)
+	depth := 0
+	mode := ""
+	for li, line := range logical {
+		switch {
+		case line == "" || strings.HasPrefix(line, "#"):
+			onLine(mode, line, starts[li], lineOther)
+		case strings.HasPrefix(line, "}"):
+			depth--
+			if depth <= 0 {
+				depth = 0
+				if mode != "" {
+					onLine(mode, line, starts[li], lineModeClose)
+					mode = ""
+					continue
+				}
+			}
+			onLine(mode, line, starts[li], lineOther)
+		case depth == 0 && modeRe.MatchString(line):
+			mode = unquote(modeRe.FindStringSubmatch(line)[1])
+			depth = 1
+			onLine(mode, line, starts[li], lineModeOpen)
+		case strings.HasSuffix(line, "{"):
+			depth++
+			onLine(mode, line, starts[li], lineOther)
+		case depth == 0 || (depth == 1 && mode != ""):
+			onLine(mode, line, starts[li], lineBinding)
+		default:
+			onLine(mode, line, starts[li], lineOther)
+		}
+	}
+}
+
+type lineKind int
+
+const (
+	lineOther lineKind = iota
+	lineBinding
+	lineModeOpen
+	lineModeClose
+)
+
+// readMainBindings records variables and bindings (default mode and mode
+// blocks) from the main config.
 func (c *Config) readMainBindings(lines []string) {
-	for _, line := range parseTopLevel(lines) {
-		if m := setRe.FindStringSubmatch(line); m != nil {
+	scanBindings(lines, func(mode, line string, _ int, kind lineKind) {
+		if kind != lineBinding {
+			return
+		}
+		if m := setRe.FindStringSubmatch(line); m != nil && mode == "" {
 			c.vars[m[1]] = strings.TrimSpace(m[2])
 		}
 		if b, ok := parseBindLine(line); ok {
+			b.Mode = mode
 			main := b
 			c.Bindings = append(c.Bindings, BindingEntry{Binding: b, Main: &main})
 		}
+	})
+}
+
+// Modes lists the binding modes in use, starting with "" (default).
+func (c *Config) Modes() []string {
+	modes := []string{""}
+	seen := map[string]bool{"": true}
+	for _, e := range c.Bindings {
+		if !seen[e.Mode] {
+			seen[e.Mode] = true
+			modes = append(modes, e.Mode)
+		}
 	}
+	return modes
 }
 
 func (c *Config) findEntry(key string, includeRemoved bool, skip int) int {
@@ -228,45 +298,59 @@ func (c *Config) findMainEntry(key string) int {
 }
 
 // loadBindings applies bindings.conf on top of the main config's bindings.
-// Lines it doesn't understand are kept and written back unchanged.
+// Lines it doesn't understand are kept and written back unchanged (inside
+// their mode block if they were in one).
 func (c *Config) loadBindings() error {
 	data, _, err := readOptional(BindingsPath())
 	if err != nil {
 		return err
 	}
 	lines := splitLines(string(data))
-	logical, starts := logicalLines(lines)
-	consumed := map[int]bool{}
-	for li, line := range logical {
-		if ub, ok := parseUnbindLine(line); ok {
-			if i := c.findMainEntry(c.bindingKey(ub)); i >= 0 {
-				c.Bindings[i].Removed = true
-				consumed[starts[li]] = true
-			}
-			continue
-		}
-		if b, ok := parseBindLine(line); ok {
-			if i := c.findMainEntry(c.bindingKey(b)); i >= 0 {
-				c.Bindings[i].Binding = b
-				c.Bindings[i].Removed = false
-			} else {
-				c.Bindings = append(c.Bindings, BindingEntry{Binding: b})
-			}
-			consumed[starts[li]] = true
-		}
-	}
-	// Keep other lines (comments, unbinds for bindings not in the main
-	// config) as written.
 	c.bindingsExtra = nil
-	for li := range logical {
-		if consumed[starts[li]] {
+	c.modeExtra = map[string][]string{}
+	var starts []int
+	consumed := map[int]bool{}
+	scanBindings(lines, func(mode, line string, start int, kind lineKind) {
+		starts = append(starts, start)
+		switch kind {
+		case lineModeOpen, lineModeClose:
+			consumed[start] = true
+			return
+		case lineBinding:
+			if ub, ok := parseUnbindLine(line); ok {
+				ub.Mode = mode
+				if i := c.findMainEntry(c.bindingKey(ub)); i >= 0 {
+					c.Bindings[i].Removed = true
+					consumed[start] = true
+					return
+				}
+			} else if b, ok := parseBindLine(line); ok {
+				b.Mode = mode
+				if i := c.findMainEntry(c.bindingKey(b)); i >= 0 {
+					c.Bindings[i].Binding = b
+					c.Bindings[i].Removed = false
+				} else {
+					c.Bindings = append(c.Bindings, BindingEntry{Binding: b})
+				}
+				consumed[start] = true
+				return
+			}
+		}
+		if mode != "" && line != "" {
+			c.modeExtra[mode] = append(c.modeExtra[mode], line)
+			consumed[start] = true
+		}
+	})
+	// Keep other top-level lines as written.
+	for k, start := range starts {
+		if consumed[start] {
 			continue
 		}
 		end := len(lines)
-		if li+1 < len(starts) {
-			end = starts[li+1]
+		if k+1 < len(starts) {
+			end = starts[k+1]
 		}
-		c.bindingsExtra = append(c.bindingsExtra, lines[starts[li]:end]...)
+		c.bindingsExtra = append(c.bindingsExtra, lines[start:end]...)
 	}
 	return nil
 }
@@ -342,21 +426,51 @@ func (c *Config) validateBindings() error {
 	return nil
 }
 
-// saveBindings writes bindings.conf: kept lines, then unbinds, then binds.
+// saveBindings writes bindings.conf: kept lines, default-mode unbinds and
+// binds, then one block per mode (kept lines, unbinds, binds).
 func (c *Config) saveBindings() error {
+	linesFor := func(mode string) []string {
+		var out []string
+		for _, e := range c.Bindings {
+			if e.Mode == mode && e.Status() == StatusRemoved {
+				out = append(out, e.Main.unbindLine())
+			}
+		}
+		for _, e := range c.Bindings {
+			if e.Mode != mode {
+				continue
+			}
+			switch e.Status() {
+			case StatusOverridden:
+				out = append(out, e.line(true))
+			case StatusAdded:
+				out = append(out, e.line(false))
+			}
+		}
+		return out
+	}
 	lines := append([]string(nil), c.bindingsExtra...)
-	for _, e := range c.Bindings {
-		if e.Status() == StatusRemoved {
-			lines = append(lines, e.Main.unbindLine())
+	lines = append(lines, linesFor("")...)
+	modes := c.Modes()[1:]
+	for m := range c.modeExtra {
+		found := false
+		for _, x := range modes {
+			found = found || x == m
+		}
+		if !found {
+			modes = append(modes, m)
 		}
 	}
-	for _, e := range c.Bindings {
-		switch e.Status() {
-		case StatusOverridden:
-			lines = append(lines, e.line(true))
-		case StatusAdded:
-			lines = append(lines, e.line(false))
+	for _, mode := range modes {
+		inner := append(append([]string(nil), c.modeExtra[mode]...), linesFor(mode)...)
+		if len(inner) == 0 {
+			continue
 		}
+		lines = append(lines, fmt.Sprintf("mode %q {", mode))
+		for _, l := range inner {
+			lines = append(lines, "    "+l)
+		}
+		lines = append(lines, "}")
 	}
 	return writeLines(BindingsPath(), lines)
 }

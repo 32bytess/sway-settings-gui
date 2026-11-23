@@ -76,6 +76,7 @@ type Config struct {
 	// from the main config, for comparing combos.
 	Bindings      []BindingEntry
 	bindingsExtra []string
+	modeExtra     map[string][]string
 	vars          map[string]string
 
 	// Rules are for_window/assign rules from every config file; only those

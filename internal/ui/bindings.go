@@ -58,6 +58,22 @@ func joinCombo(mods map[string]bool, key string) string {
 	return strings.Join(append(parts, key), "+")
 }
 
+// modeLabel shows "" (sway's default mode) as "default".
+func modeLabel(mode string) string {
+	if mode == "" {
+		return "default"
+	}
+	return mode
+}
+
+func modeFromLabel(label string) string {
+	label = strings.TrimSpace(label)
+	if label == "default" {
+		return ""
+	}
+	return label
+}
+
 var statusText = map[string]string{
 	config.StatusMain:       "",
 	config.StatusOverridden: "changed",
@@ -66,7 +82,14 @@ var statusText = map[string]string{
 }
 
 // showBindingEditor edits b; onSave applies it and returns an error to show.
-func showBindingEditor(w fyne.Window, title string, b config.Binding, onSave func(config.Binding) error) {
+func showBindingEditor(w fyne.Window, title string, modes []string, b config.Binding, onSave func(config.Binding) error) {
+	var modeLabels []string
+	for _, m := range modes {
+		modeLabels = append(modeLabels, modeLabel(m))
+	}
+	mode := widget.NewSelectEntry(modeLabels)
+	mode.SetText(modeLabel(b.Mode))
+
 	kind := widget.NewSelect([]string{"bindsym", "bindcode"}, nil)
 	if b.Kind == "" {
 		b.Kind = "bindsym"
@@ -97,6 +120,7 @@ func showBindingEditor(w fyne.Window, title string, b config.Binding, onSave fun
 	command.SetText(b.Command)
 
 	form := widget.NewForm(
+		widget.NewFormItem("Mode", mode),
 		widget.NewFormItem("Type", kind),
 		widget.NewFormItem("Modifiers", modBox),
 		widget.NewFormItem("Key", keyEntry),
@@ -108,6 +132,7 @@ func showBindingEditor(w fyne.Window, title string, b config.Binding, onSave fun
 			return
 		}
 		nb := config.Binding{
+			Mode:    modeFromLabel(mode.Text),
 			Kind:    kind.Selected,
 			Flags:   strings.Fields(flags.Text),
 			Combo:   joinCombo(mods, strings.TrimSpace(keyEntry.Text)),
@@ -117,7 +142,7 @@ func showBindingEditor(w fyne.Window, title string, b config.Binding, onSave fun
 			dialog.ShowError(err, w)
 		}
 	}, w)
-	d.Resize(fyne.NewSize(600, 360))
+	d.Resize(fyne.NewSize(600, 400))
 	d.Show()
 }
 
@@ -127,15 +152,17 @@ func MakeBindingsTab(cfg *config.Config, w fyne.Window) fyne.CanvasObject {
 	var visible []int // indices into cfg.Bindings
 	selected := -1
 	query := ""
+	modeFilter := "All modes"
 
 	list := widget.NewList(
 		func() int { return len(visible) },
 		func() fyne.CanvasObject {
 			status := widget.NewLabel("overridden")
+			mode := widget.NewLabel("[default]")
 			combo := widget.NewLabelWithStyle("$mod+Shift+XF86AudioMute", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 			cmd := widget.NewLabel("")
 			cmd.Truncation = fyne.TextTruncateEllipsis
-			return container.NewBorder(nil, nil, container.NewHBox(status, combo), nil, cmd)
+			return container.NewBorder(nil, nil, container.NewHBox(status, mode, combo), nil, cmd)
 		},
 		func(id widget.ListItemID, o fyne.CanvasObject) {
 			e := cfg.Bindings[visible[id]]
@@ -143,11 +170,12 @@ func MakeBindingsTab(cfg *config.Config, w fyne.Window) fyne.CanvasObject {
 			cmd := row.Objects[0].(*widget.Label)
 			left := row.Objects[1].(*fyne.Container)
 			left.Objects[0].(*widget.Label).SetText(statusText[e.Status()])
+			left.Objects[1].(*widget.Label).SetText("[" + modeLabel(e.Mode) + "]")
 			combo := e.Combo
 			if len(e.Flags) > 0 {
 				combo = strings.Join(e.Flags, " ") + " " + combo
 			}
-			left.Objects[1].(*widget.Label).SetText(combo)
+			left.Objects[2].(*widget.Label).SetText(combo)
 			cmd.SetText(e.Command)
 		},
 	)
@@ -179,6 +207,9 @@ func MakeBindingsTab(cfg *config.Config, w fyne.Window) fyne.CanvasObject {
 		visible = visible[:0]
 		q := strings.ToLower(query)
 		for i, e := range cfg.Bindings {
+			if modeFilter != "All modes" && modeLabel(e.Mode) != modeFilter {
+				continue
+			}
 			if q == "" || strings.Contains(strings.ToLower(e.Combo+" "+e.Command+" "+statusText[e.Status()]), q) {
 				visible = append(visible, i)
 			}
@@ -198,7 +229,7 @@ func MakeBindingsTab(cfg *config.Config, w fyne.Window) fyne.CanvasObject {
 			return
 		}
 		i := selected
-		showBindingEditor(w, "Edit binding", cfg.Bindings[i].Binding, func(b config.Binding) error {
+		showBindingEditor(w, "Edit binding", cfg.Modes(), cfg.Bindings[i].Binding, func(b config.Binding) error {
 			if err := cfg.UpdateBinding(i, b); err != nil {
 				return err
 			}
@@ -219,7 +250,11 @@ func MakeBindingsTab(cfg *config.Config, w fyne.Window) fyne.CanvasObject {
 		}
 	}
 	addBtn := widget.NewButton("Add…", func() {
-		showBindingEditor(w, "Add binding", config.Binding{}, func(b config.Binding) error {
+		newB := config.Binding{}
+		if modeFilter != "All modes" {
+			newB.Mode = modeFromLabel(modeFilter)
+		}
+		showBindingEditor(w, "Add binding", cfg.Modes(), newB, func(b config.Binding) error {
 			if err := cfg.AddBinding(b); err != nil {
 				return err
 			}
@@ -235,12 +270,22 @@ func MakeBindingsTab(cfg *config.Config, w fyne.Window) fyne.CanvasObject {
 		refresh()
 	}
 
-	note := widget.NewLabel("Default-mode bindings only (mode blocks such as \"resize\" aren't shown). " +
-		"Changes go to bindings.conf; the main config is never edited.")
+	note := widget.NewLabel("Changes go to bindings.conf (mode bindings in mode \"…\" { } blocks there); " +
+		"the main config is never edited. Typing a new mode name in the editor creates that mode.")
 	note.Wrapping = fyne.TextWrapWord
 
+	modeOptions := []string{"All modes"}
+	for _, m := range cfg.Modes() {
+		modeOptions = append(modeOptions, modeLabel(m))
+	}
+	modeSel := widget.NewSelect(modeOptions, func(s string) {
+		modeFilter = s
+		refresh()
+	})
+	modeSel.SetSelected("All modes")
+
 	refresh()
-	top := container.NewBorder(nil, nil, nil, addBtn, search)
+	top := container.NewBorder(nil, nil, modeSel, addBtn, search)
 	bottom := container.NewVBox(container.NewHBox(editBtn, removeBtn, restoreBtn), note)
 	return container.NewBorder(top, bottom, nil, nil, list)
 }
