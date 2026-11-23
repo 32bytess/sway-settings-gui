@@ -83,6 +83,11 @@ type Config struct {
 	Rules      []RuleEntry
 	rulesExtra []string
 
+	// Startup holds exec/exec_always lines from every config file; only
+	// those in startup.conf are editable.
+	Startup      []StartupEntry
+	startupExtra []string
+
 	// BorderStyle and FloatingBorderStyle are normal, pixel or none; ""
 	// keeps whatever style the config already uses.
 	BorderStyle         string
@@ -211,6 +216,9 @@ func Load() (*Config, error) {
 	if err := cfg.loadRules(); err != nil {
 		return nil, fmt.Errorf("rules: %w", err)
 	}
+	if err := cfg.loadStartup(); err != nil {
+		return nil, fmt.Errorf("startup: %w", err)
+	}
 	cfg.markWallpaperSaved()
 	cfg.inputBaseline = copyInputMaps(cfg.Input)
 	return cfg, nil
@@ -257,6 +265,7 @@ func (c *Config) loadMain() error {
 	c.readBehavior(splitLines(string(data)))
 	c.readMainBindings(splitLines(string(data)))
 	c.readRules(splitLines(string(data)), MainConfigPath())
+	c.readStartup(splitLines(string(data)), MainConfigPath())
 	return nil
 }
 
@@ -469,6 +478,9 @@ func (c *Config) validate() error {
 	if err := c.validateRules(); err != nil {
 		return err
 	}
+	if err := c.validateStartupEntries(); err != nil {
+		return err
+	}
 	if !c.SwayFX {
 		return nil
 	}
@@ -510,6 +522,9 @@ func (c *Config) Save() error {
 	}
 	if err := c.saveRules(); err != nil {
 		return fmt.Errorf("rules: %w", err)
+	}
+	if err := c.saveStartup(); err != nil {
+		return fmt.Errorf("startup: %w", err)
 	}
 	c.markWallpaperSaved()
 	c.inputBaseline = copyInputMaps(c.Input)
