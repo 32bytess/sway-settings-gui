@@ -33,7 +33,7 @@ func main() {
 
 	tabs := container.NewAppTabs(
 		container.NewTabItem("Variables", ui.MakeVariablesTab(cfg)),
-		container.NewTabItem("Appearance", ui.MakeAppearanceTab(cfg)),
+		container.NewTabItem("Appearance", container.NewVScroll(ui.MakeAppearanceTab(cfg))),
 		container.NewTabItem("Outputs", ui.MakeOutputsTab(cfg)),
 	)
 

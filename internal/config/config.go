@@ -28,10 +28,18 @@ type Config struct {
 	BlurRadius   int
 	DimInactive  float64
 
+	ShadowsEnabled      bool
+	ShadowsOnCSD        bool
+	ShadowBlurRadius    int
+	ShadowColor         string
+	ShadowInactiveColor string
+	ShadowOffsetX       int
+	ShadowOffsetY       int
+
 	Outputs []Output
 
 	// SwayFX reports whether the compositor accepts SwayFX-only commands
-	// (corner_radius, blur*, default_dim_inactive). When false they are
+	// (corner_radius, blur*, shadow*, default_dim_inactive). When false they are
 	// neither written nor kept, since plain sway rejects them.
 	SwayFX bool
 }
@@ -111,6 +119,10 @@ func Load() (*Config, error) {
 		BlurPasses:   2,
 		BlurRadius:   8,
 		DimInactive:  0.1,
+
+		ShadowBlurRadius:    20,
+		ShadowColor:         "#0000007F",
+		ShadowInactiveColor: "#0000007F",
 	}
 	if err := cfg.loadMain(); err != nil {
 		return nil, fmt.Errorf("main config: %w", err)
@@ -187,6 +199,25 @@ func (c *Config) loadAppearance() error {
 		}
 		if m := regexp.MustCompile(`^default_dim_inactive ([0-9.]+)`).FindStringSubmatch(line); m != nil {
 			c.DimInactive, _ = strconv.ParseFloat(m[1], 64)
+		}
+		if m := regexp.MustCompile(`^shadows (enable|disable)$`).FindStringSubmatch(line); m != nil {
+			c.ShadowsEnabled = m[1] == "enable"
+		}
+		if m := regexp.MustCompile(`^shadows_on_csd (enable|disable)$`).FindStringSubmatch(line); m != nil {
+			c.ShadowsOnCSD = m[1] == "enable"
+		}
+		if m := regexp.MustCompile(`^shadow_blur_radius (\d+)`).FindStringSubmatch(line); m != nil {
+			c.ShadowBlurRadius, _ = strconv.Atoi(m[1])
+		}
+		if m := regexp.MustCompile(`^shadow_color (#[0-9A-Fa-f]+)`).FindStringSubmatch(line); m != nil {
+			c.ShadowColor = m[1]
+		}
+		if m := regexp.MustCompile(`^shadow_inactive_color (#[0-9A-Fa-f]+)`).FindStringSubmatch(line); m != nil {
+			c.ShadowInactiveColor = m[1]
+		}
+		if m := regexp.MustCompile(`^shadow_offset (-?\d+) (-?\d+)`).FindStringSubmatch(line); m != nil {
+			c.ShadowOffsetX, _ = strconv.Atoi(m[1])
+			c.ShadowOffsetY, _ = strconv.Atoi(m[2])
 		}
 	}
 	return nil
@@ -292,7 +323,31 @@ func replaceInFile(path string, replacements []replacement) error {
 	return writeLines(path, lines)
 }
 
+// OpacityRule applies $opacity to every window. Without it, setting
+// $opacity has no effect.
+const OpacityRule = "for_window [all] opacity $opacity"
+
+var hexColorRe = regexp.MustCompile(`^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$`)
+
+// ValidHexColor reports whether s is a #RRGGBB or #RRGGBBAA color.
+func ValidHexColor(s string) bool { return hexColorRe.MatchString(s) }
+
+func (c *Config) validate() error {
+	if !c.SwayFX {
+		return nil
+	}
+	for name, v := range map[string]string{"shadow color": c.ShadowColor, "inactive shadow color": c.ShadowInactiveColor} {
+		if !ValidHexColor(v) {
+			return fmt.Errorf("%s %q must be #RRGGBB or #RRGGBBAA", name, v)
+		}
+	}
+	return nil
+}
+
 func (c *Config) Save() error {
+	if err := c.validate(); err != nil {
+		return err
+	}
 	if err := c.saveMain(); err != nil {
 		return fmt.Errorf("main config: %w", err)
 	}
@@ -328,10 +383,37 @@ func (c *Config) saveMain() error {
 	})
 	// Variables must be defined before use, so missing ones go at the top.
 	lines = append(missing, lines...)
+	lines = ensureOpacityRule(lines)
 	if !exists {
 		lines = append(lines, "", ConfigDInclude)
 	}
 	return writeLines(path, lines)
+}
+
+// ensureOpacityRule inserts OpacityRule right after the $opacity definition
+// unless an active (uncommented) copy already exists.
+func ensureOpacityRule(lines []string) []string {
+	setAt := -1
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == OpacityRule {
+			return lines
+		}
+		if setAt < 0 && strings.HasPrefix(trimmed, "set $opacity ") {
+			setAt = i
+		}
+	}
+	out := make([]string, 0, len(lines)+1)
+	out = append(out, lines[:setAt+1]...)
+	out = append(out, OpacityRule)
+	return append(out, lines[setAt+1:]...)
+}
+
+func enableDisable(b bool) string {
+	if b {
+		return "enable"
+	}
+	return "disable"
 }
 
 func (c *Config) saveAppearance() error {
@@ -351,6 +433,12 @@ func (c *Config) saveAppearance() error {
 		{regexp.MustCompile(`^blur_passes \d+`), fmt.Sprintf("blur_passes %d", c.BlurPasses)},
 		{regexp.MustCompile(`^blur_radius \d+`), fmt.Sprintf("blur_radius %d", c.BlurRadius)},
 		{regexp.MustCompile(`^default_dim_inactive [0-9.]+`), fmt.Sprintf("default_dim_inactive %.2f", c.DimInactive)},
+		{regexp.MustCompile(`^shadows (enable|disable)$`), "shadows " + enableDisable(c.ShadowsEnabled)},
+		{regexp.MustCompile(`^shadows_on_csd (enable|disable)$`), "shadows_on_csd " + enableDisable(c.ShadowsOnCSD)},
+		{regexp.MustCompile(`^shadow_blur_radius `), fmt.Sprintf("shadow_blur_radius %d", c.ShadowBlurRadius)},
+		{regexp.MustCompile(`^shadow_color `), "shadow_color " + c.ShadowColor},
+		{regexp.MustCompile(`^shadow_inactive_color `), "shadow_inactive_color " + c.ShadowInactiveColor},
+		{regexp.MustCompile(`^shadow_offset `), fmt.Sprintf("shadow_offset %d %d", c.ShadowOffsetX, c.ShadowOffsetY)},
 	}
 	if c.SwayFX {
 		return replaceInFile(AppearancePath(), append(common, swayFX...))

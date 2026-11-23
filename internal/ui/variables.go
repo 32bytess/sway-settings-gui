@@ -48,7 +48,7 @@ func MakeVariablesTab(cfg *config.Config) fyne.CanvasObject {
 			widget.NewFormItem("App menu command", menuEntry),
 		),
 		widget.NewSeparator(),
-		widget.NewLabel("Default window opacity"),
+		widget.NewLabel("Default window opacity (applies to newly opened windows)"),
 		container.NewGridWithColumns(2, opacitySlider, opacityVal),
 	)
 }

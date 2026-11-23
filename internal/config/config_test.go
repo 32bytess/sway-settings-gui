@@ -289,3 +289,133 @@ func TestSaveRoundsOpacity(t *testing.T) {
 	main := readFile(t, MainConfigPath())
 	mustContain(t, main, "set $opacity 0.9\n")
 }
+
+func TestSaveAddsOpacityRuleAfterSet(t *testing.T) {
+	setupHome(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Opacity = 0.9
+	for i := 0; i < 2; i++ {
+		if err := cfg.Save(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	main := readFile(t, MainConfigPath())
+	mustContain(t, main, "set $opacity 0.9\n")
+	mustContain(t, main, OpacityRule)
+	if strings.Count(main, OpacityRule) != 1 {
+		t.Fatalf("expected exactly one opacity rule:\n%s", main)
+	}
+	if strings.Index(main, OpacityRule) < strings.Index(main, "set $opacity") {
+		t.Fatalf("opacity rule must come after $opacity is set:\n%s", main)
+	}
+}
+
+func TestSaveKeepsExistingOpacityRule(t *testing.T) {
+	setupHome(t)
+	if err := os.MkdirAll(filepath.Dir(MainConfigPath()), 0755); err != nil {
+		t.Fatal(err)
+	}
+	existing := "set $opacity 0.8\n" + OpacityRule + "\nbindsym $mod+Return exec $term\n"
+	if err := os.WriteFile(MainConfigPath(), []byte(existing), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	main := readFile(t, MainConfigPath())
+	if strings.Count(main, OpacityRule) != 1 {
+		t.Fatalf("expected exactly one opacity rule:\n%s", main)
+	}
+}
+
+func TestLoadParsesShadows(t *testing.T) {
+	setupHome(t)
+	if err := os.MkdirAll(filepath.Dir(AppearancePath()), 0755); err != nil {
+		t.Fatal(err)
+	}
+	app := "shadows enable\nshadows_on_csd enable\nshadow_blur_radius 30\nshadow_color #11223344\nshadow_inactive_color #55667788\nshadow_offset -3 5\n"
+	if err := os.WriteFile(AppearancePath(), []byte(app), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.ShadowsEnabled || !cfg.ShadowsOnCSD || cfg.ShadowBlurRadius != 30 ||
+		cfg.ShadowColor != "#11223344" || cfg.ShadowInactiveColor != "#55667788" ||
+		cfg.ShadowOffsetX != -3 || cfg.ShadowOffsetY != 5 {
+		t.Fatalf("shadow settings not parsed: %+v", cfg)
+	}
+}
+
+func TestLoadShadowDefaults(t *testing.T) {
+	setupHome(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ShadowsEnabled || cfg.ShadowBlurRadius != 20 || cfg.ShadowColor != "#0000007F" || cfg.ShadowInactiveColor != "#0000007F" {
+		t.Fatalf("unexpected shadow defaults: %+v", cfg)
+	}
+}
+
+func TestSaveSwayFXWritesShadows(t *testing.T) {
+	setupHome(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.SwayFX = true
+	cfg.ShadowsEnabled = true
+	cfg.ShadowBlurRadius = 25
+	cfg.ShadowColor = "#000000AA"
+	cfg.ShadowOffsetX, cfg.ShadowOffsetY = 2, -4
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	app := readFile(t, AppearancePath())
+	for _, want := range []string{"shadows enable", "shadows_on_csd disable", "shadow_blur_radius 25", "shadow_color #000000AA", "shadow_inactive_color #0000007F", "shadow_offset 2 -4"} {
+		mustContain(t, app, want)
+	}
+}
+
+func TestSavePlainSwayRemovesShadows(t *testing.T) {
+	setupHome(t)
+	if err := os.MkdirAll(filepath.Dir(AppearancePath()), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(AppearancePath(), []byte("gaps inner 4\nshadows enable\nshadow_offset 0 0\nshadow_color #0000007F\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.SwayFX = false
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if app := readFile(t, AppearancePath()); strings.Contains(app, "shadow") {
+		t.Fatalf("plain sway config should not contain shadow settings:\n%s", app)
+	}
+}
+
+func TestSaveRejectsInvalidShadowColor(t *testing.T) {
+	setupHome(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.SwayFX = true
+	cfg.ShadowColor = "black"
+	if err := cfg.Save(); err == nil {
+		t.Fatal("expected error for invalid shadow color")
+	}
+}

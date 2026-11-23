@@ -56,6 +56,38 @@ func MakeAppearanceTab(cfg *config.Config) fyne.CanvasObject {
 	box.Add(blurCheck)
 	box.Add(intRow("Blur passes", 1, 10, func() int { return cfg.BlurPasses }, func(v int) { cfg.BlurPasses = v }))
 	box.Add(intRow("Blur radius", 1, 20, func() int { return cfg.BlurRadius }, func(v int) { cfg.BlurRadius = v }))
+	colorEntry := func(get func() string, set func(string)) *widget.Entry {
+		e := widget.NewEntry()
+		e.SetPlaceHolder("#RRGGBBAA")
+		e.SetText(get())
+		e.Validator = func(s string) error {
+			if !config.ValidHexColor(s) {
+				return fmt.Errorf("use #RRGGBB or #RRGGBBAA")
+			}
+			return nil
+		}
+		e.OnChanged = set
+		return e
+	}
+	labeled := func(label string, obj fyne.CanvasObject) fyne.CanvasObject {
+		return container.NewGridWithColumns(2, widget.NewLabel(label), obj)
+	}
+
+	shadowsCheck := widget.NewCheck("Enable shadows", func(v bool) { cfg.ShadowsEnabled = v })
+	shadowsCheck.SetChecked(cfg.ShadowsEnabled)
+	csdCheck := widget.NewCheck("Shadows on client-side decorations", func(v bool) { cfg.ShadowsOnCSD = v })
+	csdCheck.SetChecked(cfg.ShadowsOnCSD)
+
+	box.Add(widget.NewSeparator())
+	box.Add(widget.NewLabelWithStyle("Shadows", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+	box.Add(shadowsCheck)
+	box.Add(csdCheck)
+	box.Add(intRow("Shadow blur radius", 0, 100, func() int { return cfg.ShadowBlurRadius }, func(v int) { cfg.ShadowBlurRadius = v }))
+	box.Add(intRow("Shadow offset X (px)", -50, 50, func() int { return cfg.ShadowOffsetX }, func(v int) { cfg.ShadowOffsetX = v }))
+	box.Add(intRow("Shadow offset Y (px)", -50, 50, func() int { return cfg.ShadowOffsetY }, func(v int) { cfg.ShadowOffsetY = v }))
+	box.Add(labeled("Shadow color", colorEntry(func() string { return cfg.ShadowColor }, func(v string) { cfg.ShadowColor = v })))
+	box.Add(labeled("Inactive shadow color", colorEntry(func() string { return cfg.ShadowInactiveColor }, func(v string) { cfg.ShadowInactiveColor = v })))
+
 	box.Add(widget.NewSeparator())
 	box.Add(widget.NewLabelWithStyle("Inactive Windows", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
 	box.Add(floatRow("Dim inactive", 0, 0.5, 0.05, func() float64 { return cfg.DimInactive }, func(v float64) { cfg.DimInactive = v }))
