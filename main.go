@@ -15,7 +15,7 @@ import (
 )
 
 func main() {
-	a := app.New()
+	a := app.NewWithID("com.github.32bytess.sway-settings-gui")
 	w := a.NewWindow("Sway Settings")
 	w.Resize(fyne.NewSize(620, 520))
 
