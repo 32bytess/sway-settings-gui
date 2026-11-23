@@ -373,3 +373,29 @@ func TestModeNameValidation(t *testing.T) {
 		t.Errorf("mode names with spaces and parentheses are valid: %v", err)
 	}
 }
+
+func TestEditingComboBackRestoresOriginal(t *testing.T) {
+	cfg := loadBindings(t)
+	i := findModeBinding(t, cfg, "resize", "Left")
+	b := cfg.Bindings[i].Binding
+	b.Combo = "h"
+	if err := cfg.UpdateBinding(i, b); err != nil {
+		t.Fatal(err)
+	}
+	j := findModeBinding(t, cfg, "resize", "h")
+	b.Combo = "Left"
+	if err := cfg.UpdateBinding(j, b); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range cfg.Bindings {
+		if e.Mode == "resize" && (e.Combo == "h" || e.Status() != StatusMain) {
+			t.Fatalf("expected the original to be restored, got %+v (%s)", e.Binding, e.Status())
+		}
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, BindingsPath()); got != "" {
+		t.Fatalf("bindings.conf = %q, want empty", got)
+	}
+}

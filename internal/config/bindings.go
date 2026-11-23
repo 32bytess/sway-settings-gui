@@ -385,7 +385,19 @@ func (c *Config) UpdateBinding(i int, b Binding) error {
 		return fmt.Errorf("%s is already bound to %q", b.Combo, c.Bindings[j].Command)
 	}
 	e := &c.Bindings[i]
-	if e.Main == nil || key == c.bindingKey(*e.Main) {
+	if e.Main == nil {
+		// An added binding edited to the keys of a removed original turns
+		// that original back on instead of unbinding and rebinding it.
+		if j := c.findMainEntry(key); j >= 0 && c.Bindings[j].Removed {
+			c.Bindings[j].Binding = b
+			c.Bindings[j].Removed = false
+			c.Bindings = append(c.Bindings[:i], c.Bindings[i+1:]...)
+			return nil
+		}
+		e.Binding = b
+		return nil
+	}
+	if key == c.bindingKey(*e.Main) {
 		e.Binding = b
 		e.Removed = false
 		return nil
