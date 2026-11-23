@@ -55,6 +55,7 @@ func main() {
 		container.NewTabItem("Input", ui.MakeInputTab(cfg, inputTypes)),
 		container.NewTabItem("Behavior", ui.MakeBehaviorTab(cfg, w)),
 		container.NewTabItem("Bindings", ui.MakeBindingsTab(cfg, w)),
+		container.NewTabItem("Rules", ui.MakeRulesTab(cfg, w)),
 	)
 
 	saveBtn := widget.NewButton("Save & Reload Sway", func() {

@@ -78,6 +78,11 @@ type Config struct {
 	bindingsExtra []string
 	vars          map[string]string
 
+	// Rules are for_window/assign rules from every config file; only those
+	// in rules.conf are editable.
+	Rules      []RuleEntry
+	rulesExtra []string
+
 	// BorderStyle and FloatingBorderStyle are normal, pixel or none; ""
 	// keeps whatever style the config already uses.
 	BorderStyle         string
@@ -203,6 +208,9 @@ func Load() (*Config, error) {
 	if err := cfg.loadBindings(); err != nil {
 		return nil, fmt.Errorf("bindings: %w", err)
 	}
+	if err := cfg.loadRules(); err != nil {
+		return nil, fmt.Errorf("rules: %w", err)
+	}
 	cfg.markWallpaperSaved()
 	cfg.inputBaseline = copyInputMaps(cfg.Input)
 	return cfg, nil
@@ -248,6 +256,7 @@ func (c *Config) loadMain() error {
 	c.readInputs(splitLines(string(data)))
 	c.readBehavior(splitLines(string(data)))
 	c.readMainBindings(splitLines(string(data)))
+	c.readRules(splitLines(string(data)), MainConfigPath())
 	return nil
 }
 
@@ -457,6 +466,9 @@ func (c *Config) validate() error {
 	if err := c.validateBindings(); err != nil {
 		return err
 	}
+	if err := c.validateRules(); err != nil {
+		return err
+	}
 	if !c.SwayFX {
 		return nil
 	}
@@ -495,6 +507,9 @@ func (c *Config) Save() error {
 	c.behaviorBaseline = copyStringMap(c.Behavior)
 	if err := c.saveBindings(); err != nil {
 		return fmt.Errorf("bindings: %w", err)
+	}
+	if err := c.saveRules(); err != nil {
+		return fmt.Errorf("rules: %w", err)
 	}
 	c.markWallpaperSaved()
 	c.inputBaseline = copyInputMaps(c.Input)
