@@ -185,7 +185,7 @@ func (c *Config) loadAppearance() error {
 		if m := regexp.MustCompile(`^corner_radius (\d+)`).FindStringSubmatch(line); m != nil {
 			c.CornerRadius, _ = strconv.Atoi(m[1])
 		}
-		if m := regexp.MustCompile(`^default_border pixel (\d+)`).FindStringSubmatch(line); m != nil {
+		if m := regexp.MustCompile(`^default_border (?:normal|pixel) (\d+)`).FindStringSubmatch(line); m != nil {
 			c.BorderSize, _ = strconv.Atoi(m[1])
 		}
 		if m := regexp.MustCompile(`^blur (enable|disable)`).FindStringSubmatch(line); m != nil {
@@ -248,7 +248,10 @@ func (c *Config) loadOutputs() error {
 
 type replacement struct {
 	re  *regexp.Regexp
-	val string
+	val string // the line to write; also appended when no line matches
+	// rewrite, when set, computes the new line from the matched one instead
+	// of using val, so parts the app doesn't manage can be preserved.
+	rewrite func(trimmed string) string
 }
 
 // readOptional reads path, reporting exists=false (and no error) when the
@@ -288,7 +291,11 @@ func applyReplacements(lines []string, replacements []replacement) []string {
 		}
 		for j, r := range replacements {
 			if r.re.MatchString(trimmed) {
-				lines[i] = leadingIndent(line) + r.val
+				val := r.val
+				if r.rewrite != nil {
+					val = r.rewrite(trimmed)
+				}
+				lines[i] = leadingIndent(line) + val
 				matched[j] = true
 				break
 			}
@@ -376,10 +383,10 @@ func (c *Config) saveMain() error {
 	}
 	lines := splitLines(string(data))
 	missing := applyReplacements(lines, []replacement{
-		{regexp.MustCompile(`^set \$mod `), fmt.Sprintf("set $mod %s", c.ModKey)},
-		{regexp.MustCompile(`^set \$term `), fmt.Sprintf("set $term %s", c.Terminal)},
-		{regexp.MustCompile(`^set \$menu `), fmt.Sprintf("set $menu %s", c.Menu)},
-		{regexp.MustCompile(`^set \$opacity `), "set $opacity " + strconv.FormatFloat(math.Round(c.Opacity*100)/100, 'f', -1, 64)},
+		{regexp.MustCompile(`^set \$mod `), fmt.Sprintf("set $mod %s", c.ModKey), nil},
+		{regexp.MustCompile(`^set \$term `), fmt.Sprintf("set $term %s", c.Terminal), nil},
+		{regexp.MustCompile(`^set \$menu `), fmt.Sprintf("set $menu %s", c.Menu), nil},
+		{regexp.MustCompile(`^set \$opacity `), "set $opacity " + strconv.FormatFloat(math.Round(c.Opacity*100)/100, 'f', -1, 64), nil},
 	})
 	// Variables must be defined before use, so missing ones go at the top.
 	lines = append(missing, lines...)
@@ -388,6 +395,24 @@ func (c *Config) saveMain() error {
 		lines = append(lines, "", ConfigDInclude)
 	}
 	return writeLines(path, lines)
+}
+
+// borderReplacement updates the width of a default_border-style command
+// while keeping its style: "normal N" stays normal, "pixel N" stays pixel,
+// and styles without a width (none, csd) are left untouched. When the command
+// is absent, "pixel N" is added.
+func borderReplacement(cmd string, size int) replacement {
+	return replacement{
+		re:  regexp.MustCompile(`^` + cmd + `(\s|$)`),
+		val: fmt.Sprintf("%s pixel %d", cmd, size),
+		rewrite: func(trimmed string) string {
+			fields := strings.Fields(trimmed)
+			if len(fields) < 2 || (fields[1] != "normal" && fields[1] != "pixel") {
+				return trimmed
+			}
+			return fmt.Sprintf("%s %s %d", cmd, fields[1], size)
+		},
+	}
 }
 
 // ensureOpacityRule inserts OpacityRule right after the $opacity definition
@@ -422,23 +447,23 @@ func (c *Config) saveAppearance() error {
 		blurVal = "disable"
 	}
 	common := []replacement{
-		{regexp.MustCompile(`^gaps inner \d+`), fmt.Sprintf("gaps inner %d", c.GapsInner)},
-		{regexp.MustCompile(`^gaps outer \d+`), fmt.Sprintf("gaps outer %d", c.GapsOuter)},
-		{regexp.MustCompile(`^default_border pixel \d+`), fmt.Sprintf("default_border pixel %d", c.BorderSize)},
-		{regexp.MustCompile(`^default_floating_border pixel \d+`), fmt.Sprintf("default_floating_border pixel %d", c.BorderSize)},
+		{regexp.MustCompile(`^gaps inner \d+`), fmt.Sprintf("gaps inner %d", c.GapsInner), nil},
+		{regexp.MustCompile(`^gaps outer \d+`), fmt.Sprintf("gaps outer %d", c.GapsOuter), nil},
+		borderReplacement("default_border", c.BorderSize),
+		borderReplacement("default_floating_border", c.BorderSize),
 	}
 	swayFX := []replacement{
-		{regexp.MustCompile(`^corner_radius \d+`), fmt.Sprintf("corner_radius %d", c.CornerRadius)},
-		{regexp.MustCompile(`^blur (enable|disable)$`), fmt.Sprintf("blur %s", blurVal)},
-		{regexp.MustCompile(`^blur_passes \d+`), fmt.Sprintf("blur_passes %d", c.BlurPasses)},
-		{regexp.MustCompile(`^blur_radius \d+`), fmt.Sprintf("blur_radius %d", c.BlurRadius)},
-		{regexp.MustCompile(`^default_dim_inactive [0-9.]+`), fmt.Sprintf("default_dim_inactive %.2f", c.DimInactive)},
-		{regexp.MustCompile(`^shadows (enable|disable)$`), "shadows " + enableDisable(c.ShadowsEnabled)},
-		{regexp.MustCompile(`^shadows_on_csd (enable|disable)$`), "shadows_on_csd " + enableDisable(c.ShadowsOnCSD)},
-		{regexp.MustCompile(`^shadow_blur_radius `), fmt.Sprintf("shadow_blur_radius %d", c.ShadowBlurRadius)},
-		{regexp.MustCompile(`^shadow_color `), "shadow_color " + c.ShadowColor},
-		{regexp.MustCompile(`^shadow_inactive_color `), "shadow_inactive_color " + c.ShadowInactiveColor},
-		{regexp.MustCompile(`^shadow_offset `), fmt.Sprintf("shadow_offset %d %d", c.ShadowOffsetX, c.ShadowOffsetY)},
+		{regexp.MustCompile(`^corner_radius \d+`), fmt.Sprintf("corner_radius %d", c.CornerRadius), nil},
+		{regexp.MustCompile(`^blur (enable|disable)$`), fmt.Sprintf("blur %s", blurVal), nil},
+		{regexp.MustCompile(`^blur_passes \d+`), fmt.Sprintf("blur_passes %d", c.BlurPasses), nil},
+		{regexp.MustCompile(`^blur_radius \d+`), fmt.Sprintf("blur_radius %d", c.BlurRadius), nil},
+		{regexp.MustCompile(`^default_dim_inactive [0-9.]+`), fmt.Sprintf("default_dim_inactive %.2f", c.DimInactive), nil},
+		{regexp.MustCompile(`^shadows (enable|disable)$`), "shadows " + enableDisable(c.ShadowsEnabled), nil},
+		{regexp.MustCompile(`^shadows_on_csd (enable|disable)$`), "shadows_on_csd " + enableDisable(c.ShadowsOnCSD), nil},
+		{regexp.MustCompile(`^shadow_blur_radius `), fmt.Sprintf("shadow_blur_radius %d", c.ShadowBlurRadius), nil},
+		{regexp.MustCompile(`^shadow_color `), "shadow_color " + c.ShadowColor, nil},
+		{regexp.MustCompile(`^shadow_inactive_color `), "shadow_inactive_color " + c.ShadowInactiveColor, nil},
+		{regexp.MustCompile(`^shadow_offset `), fmt.Sprintf("shadow_offset %d %d", c.ShadowOffsetX, c.ShadowOffsetY), nil},
 	}
 	if c.SwayFX {
 		return replaceInFile(AppearancePath(), append(common, swayFX...))

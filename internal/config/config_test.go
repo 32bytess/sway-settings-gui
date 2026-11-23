@@ -419,3 +419,52 @@ func TestSaveRejectsInvalidShadowColor(t *testing.T) {
 		t.Fatal("expected error for invalid shadow color")
 	}
 }
+
+func TestSaveKeepsBorderStyle(t *testing.T) {
+	setupHome(t)
+	if err := os.MkdirAll(filepath.Dir(AppearancePath()), 0755); err != nil {
+		t.Fatal(err)
+	}
+	existing := "default_border normal 2\ndefault_floating_border normal 2\n"
+	if err := os.WriteFile(AppearancePath(), []byte(existing), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.BorderSize != 2 {
+		t.Fatalf("BorderSize = %d, want 2 from 'default_border normal 2'", cfg.BorderSize)
+	}
+	cfg.BorderSize = 3
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	app := readFile(t, AppearancePath())
+	mustContain(t, app, "default_border normal 3")
+	mustContain(t, app, "default_floating_border normal 3")
+	if strings.Contains(app, "pixel") {
+		t.Fatalf("border style should be preserved, not replaced with pixel:\n%s", app)
+	}
+}
+
+func TestSaveKeepsBorderNone(t *testing.T) {
+	setupHome(t)
+	if err := os.MkdirAll(filepath.Dir(AppearancePath()), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(AppearancePath(), []byte("default_floating_border none\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	app := readFile(t, AppearancePath())
+	if strings.Count(app, "default_floating_border") != 1 || !strings.Contains(app, "default_floating_border none") {
+		t.Fatalf("'none' border should be left alone:\n%s", app)
+	}
+}
