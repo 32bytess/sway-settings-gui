@@ -88,6 +88,9 @@ type Config struct {
 	Startup      []StartupEntry
 	startupExtra []string
 
+	// Bar is the swaybar managed in bar.conf.
+	Bar Bar
+
 	// BorderStyle and FloatingBorderStyle are normal, pixel or none; ""
 	// keeps whatever style the config already uses.
 	BorderStyle         string
@@ -189,6 +192,7 @@ func Default() *Config {
 	cfg.Input = newInputMaps()
 	cfg.Behavior = map[string]string{}
 	cfg.vars = map[string]string{}
+	cfg.Bar = newBar()
 	return cfg
 }
 
@@ -218,6 +222,9 @@ func Load() (*Config, error) {
 	}
 	if err := cfg.loadStartup(); err != nil {
 		return nil, fmt.Errorf("startup: %w", err)
+	}
+	if err := cfg.loadBar(); err != nil {
+		return nil, fmt.Errorf("bar: %w", err)
 	}
 	cfg.markWallpaperSaved()
 	cfg.inputBaseline = copyInputMaps(cfg.Input)
@@ -266,6 +273,7 @@ func (c *Config) loadMain() error {
 	c.readMainBindings(splitLines(string(data)))
 	c.readRules(splitLines(string(data)), MainConfigPath())
 	c.readStartup(splitLines(string(data)), MainConfigPath())
+	c.Bar.OtherBars += countBars(splitLines(string(data)))
 	return nil
 }
 
@@ -481,6 +489,9 @@ func (c *Config) validate() error {
 	if err := c.validateStartupEntries(); err != nil {
 		return err
 	}
+	if err := c.validateBar(); err != nil {
+		return err
+	}
 	if !c.SwayFX {
 		return nil
 	}
@@ -525,6 +536,9 @@ func (c *Config) Save() error {
 	}
 	if err := c.saveStartup(); err != nil {
 		return fmt.Errorf("startup: %w", err)
+	}
+	if err := c.saveBar(); err != nil {
+		return fmt.Errorf("bar: %w", err)
 	}
 	c.markWallpaperSaved()
 	c.inputBaseline = copyInputMaps(c.Input)

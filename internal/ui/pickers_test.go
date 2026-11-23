@@ -87,3 +87,15 @@ func TestFontDescription(t *testing.T) {
 		t.Fatalf("formatFontDesc = %q", got)
 	}
 }
+
+func TestBarColorValues(t *testing.T) {
+	if got := barColorValues("", "focused_workspace"); !reflect.DeepEqual(got, []string{"#4c7899", "#285577", "#ffffff"}) {
+		t.Fatalf("defaults = %v", got)
+	}
+	if got := barColorValues("", "background"); !reflect.DeepEqual(got, []string{"#000000"}) {
+		t.Fatalf("single default = %v", got)
+	}
+	if got := barColorValues("#111111 #222222 #333333", "urgent_workspace"); !reflect.DeepEqual(got, []string{"#111111", "#222222", "#333333"}) {
+		t.Fatalf("given = %v", got)
+	}
+}

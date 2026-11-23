@@ -159,43 +159,100 @@ func (cb *colorButton) object() fyne.CanvasObject {
 	return container.NewBorder(nil, nil, cb.swatch, nil, cb.button)
 }
 
-// clientColorsSection edits one client.* class with a picker per colour.
-// An unset class shows sway's defaults; changing any colour writes all five.
-func clientColorsSection(w fyne.Window, values map[string]string, spec config.SettingSpec) fyne.CanvasObject {
+// barColorDefaults are swaybar's built-in colours for each colors { } entry.
+var barColorDefaults = map[string][]string{
+	"background":         {"#000000"},
+	"statusline":         {"#ffffff"},
+	"separator":          {"#666666"},
+	"focused_workspace":  {"#4c7899", "#285577", "#ffffff"},
+	"active_workspace":   {"#333333", "#5f676a", "#ffffff"},
+	"inactive_workspace": {"#333333", "#222222", "#888888"},
+	"urgent_workspace":   {"#2f343a", "#900000", "#ffffff"},
+	"binding_mode":       {"#2f343a", "#900000", "#ffffff"},
+}
+
+// barColorValues returns the colours of a bar colors { } entry, using
+// swaybar's defaults when unset.
+func barColorValues(value, key string) []string {
+	vals := append([]string(nil), barColorDefaults[key]...)
+	copy(vals, strings.Fields(value))
+	return vals
+}
+
+// colorGroup edits a value made of several colours with a picker each.
+// get returns all colours (defaults filled in); set stores colour idx;
+// reset clears the value so the default applies.
+func colorGroup(w fyne.Window, label string, names []string, isSet func() bool,
+	get func() []string, set func(idx int, hex string), reset func()) fyne.CanvasObject {
 	status := widget.NewLabel("")
 	var buttons []*colorButton
 	refreshAll := func() {
-		if values[spec.Key] == "" {
-			status.SetText("(sway default)")
-		} else {
+		if isSet() {
 			status.SetText("")
+		} else {
+			status.SetText("(default)")
 		}
 		for _, b := range buttons {
 			b.refresh()
 		}
 	}
-	grid := container.NewGridWithColumns(3)
-	for i, name := range clientColorNames {
+	cols := 3
+	if len(names) < cols {
+		cols = len(names)
+	}
+	grid := container.NewGridWithColumns(cols)
+	for i, name := range names {
 		i := i
-		b := newColorButton(w, spec.Label+": "+name, false,
-			func() string { return clientColorValues(values[spec.Key], spec.Key)[i] },
+		b := newColorButton(w, label+": "+name, false,
+			func() string { return get()[i] },
 			func(hex string) {
-				values[spec.Key] = setClientColor(values[spec.Key], spec.Key, i, hex)
+				set(i, hex)
 				refreshAll()
 			})
 		buttons = append(buttons, b)
-		grid.Add(container.NewVBox(widget.NewLabel(name), b.object()))
+		if len(names) > 1 {
+			grid.Add(container.NewVBox(widget.NewLabel(name), b.object()))
+		} else {
+			grid.Add(b.object())
+		}
 	}
-	reset := widget.NewButton("Reset", func() {
-		values[spec.Key] = ""
+	resetBtn := widget.NewButton("Reset", func() {
+		reset()
 		refreshAll()
 	})
 	refreshAll()
 	header := container.NewHBox(
-		widget.NewLabelWithStyle(spec.Label, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		status, reset,
+		widget.NewLabelWithStyle(label, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		status, resetBtn,
 	)
 	return container.NewVBox(header, grid)
+}
+
+// clientColorsSection edits one client.* class with a picker per colour.
+// An unset class shows sway's defaults; changing any colour writes all five.
+func clientColorsSection(w fyne.Window, values map[string]string, spec config.SettingSpec) fyne.CanvasObject {
+	return colorGroup(w, spec.Label, clientColorNames,
+		func() bool { return values[spec.Key] != "" },
+		func() []string { return clientColorValues(values[spec.Key], spec.Key) },
+		func(i int, hex string) { values[spec.Key] = setClientColor(values[spec.Key], spec.Key, i, hex) },
+		func() { values[spec.Key] = "" })
+}
+
+// barColorSection edits one bar colors { } entry.
+func barColorSection(w fyne.Window, values map[string]string, spec config.SettingSpec) fyne.CanvasObject {
+	names := []string{"Colour"}
+	if len(barColorDefaults[spec.Key]) == 3 {
+		names = []string{"Border", "Background", "Text"}
+	}
+	return colorGroup(w, spec.Label, names,
+		func() bool { return values[spec.Key] != "" },
+		func() []string { return barColorValues(values[spec.Key], spec.Key) },
+		func(i int, hex string) {
+			vals := barColorValues(values[spec.Key], spec.Key)
+			vals[i] = hex
+			values[spec.Key] = strings.Join(vals, " ")
+		},
+		func() { values[spec.Key] = "" })
 }
 
 // fontField is an editable font description with a Browse button that
