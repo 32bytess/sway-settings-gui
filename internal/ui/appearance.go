@@ -10,7 +10,7 @@ import (
 	"sway-settings/internal/config"
 )
 
-func MakeAppearanceTab(cfg *config.Config) fyne.CanvasObject {
+func MakeAppearanceTab(cfg *config.Config, w fyne.Window) fyne.CanvasObject {
 	intRow := func(label string, min, max float64, get func() int, set func(int)) fyne.CanvasObject {
 		lbl := widget.NewLabel(fmt.Sprintf("%d", get()))
 		s := widget.NewSlider(min, max)
@@ -71,18 +71,10 @@ func MakeAppearanceTab(cfg *config.Config) fyne.CanvasObject {
 	box.Add(floatRow("Blur brightness", 0, 2, 0.05, func() float64 { return cfg.BlurBrightness }, func(v float64) { cfg.BlurBrightness = v }))
 	box.Add(floatRow("Blur contrast", 0, 2, 0.05, func() float64 { return cfg.BlurContrast }, func(v float64) { cfg.BlurContrast = v }))
 	box.Add(floatRow("Blur saturation", 0, 2, 0.05, func() float64 { return cfg.BlurSaturation }, func(v float64) { cfg.BlurSaturation = v }))
-	colorEntry := func(get func() string, set func(string)) *widget.Entry {
-		e := widget.NewEntry()
-		e.SetPlaceHolder("#RRGGBBAA")
-		e.SetText(get())
-		e.Validator = func(s string) error {
-			if !config.ValidHexColor(s) {
-				return fmt.Errorf("use #RRGGBB or #RRGGBBAA")
-			}
-			return nil
-		}
-		e.OnChanged = set
-		return e
+	// SwayFX colours take an alpha channel, so the picker always writes
+	// #RRGGBBAA.
+	colorEntry := func(title string, get func() string, set func(string)) fyne.CanvasObject {
+		return newColorButton(w, title, true, get, set).object()
 	}
 	labeled := func(label string, obj fyne.CanvasObject) fyne.CanvasObject {
 		return container.NewGridWithColumns(2, widget.NewLabel(label), obj)
@@ -100,14 +92,14 @@ func MakeAppearanceTab(cfg *config.Config) fyne.CanvasObject {
 	box.Add(intRow("Shadow blur radius", 0, 100, func() int { return cfg.ShadowBlurRadius }, func(v int) { cfg.ShadowBlurRadius = v }))
 	box.Add(intRow("Shadow offset X (px)", -50, 50, func() int { return cfg.ShadowOffsetX }, func(v int) { cfg.ShadowOffsetX = v }))
 	box.Add(intRow("Shadow offset Y (px)", -50, 50, func() int { return cfg.ShadowOffsetY }, func(v int) { cfg.ShadowOffsetY = v }))
-	box.Add(labeled("Shadow color", colorEntry(func() string { return cfg.ShadowColor }, func(v string) { cfg.ShadowColor = v })))
-	box.Add(labeled("Inactive shadow color", colorEntry(func() string { return cfg.ShadowInactiveColor }, func(v string) { cfg.ShadowInactiveColor = v })))
+	box.Add(labeled("Shadow color", colorEntry("Shadow color", func() string { return cfg.ShadowColor }, func(v string) { cfg.ShadowColor = v })))
+	box.Add(labeled("Inactive shadow color", colorEntry("Inactive shadow color", func() string { return cfg.ShadowInactiveColor }, func(v string) { cfg.ShadowInactiveColor = v })))
 
 	box.Add(widget.NewSeparator())
 	box.Add(widget.NewLabelWithStyle("Inactive Windows", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
 	box.Add(floatRow("Dim inactive", 0, 1, 0.05, func() float64 { return cfg.DimInactive }, func(v float64) { cfg.DimInactive = v }))
-	box.Add(labeled("Dim color", colorEntry(func() string { return cfg.DimUnfocusedColor }, func(v string) { cfg.DimUnfocusedColor = v })))
-	box.Add(labeled("Dim color (urgent)", colorEntry(func() string { return cfg.DimUrgentColor }, func(v string) { cfg.DimUrgentColor = v })))
+	box.Add(labeled("Dim color", colorEntry("Dim color", func() string { return cfg.DimUnfocusedColor }, func(v string) { cfg.DimUnfocusedColor = v })))
+	box.Add(labeled("Dim color (urgent)", colorEntry("Dim color (urgent)", func() string { return cfg.DimUrgentColor }, func(v string) { cfg.DimUrgentColor = v })))
 	return box
 }
 

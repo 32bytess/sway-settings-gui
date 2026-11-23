@@ -50,10 +50,10 @@ func main() {
 
 	tabs := container.NewAppTabs(
 		container.NewTabItem("Variables", ui.MakeVariablesTab(cfg, w)),
-		container.NewTabItem("Appearance", container.NewVScroll(ui.MakeAppearanceTab(cfg))),
+		container.NewTabItem("Appearance", container.NewVScroll(ui.MakeAppearanceTab(cfg, w))),
 		container.NewTabItem("Outputs", ui.MakeOutputsTab(cfg, w)),
 		container.NewTabItem("Input", ui.MakeInputTab(cfg, inputTypes)),
-		container.NewTabItem("Behavior", ui.MakeBehaviorTab(cfg)),
+		container.NewTabItem("Behavior", ui.MakeBehaviorTab(cfg, w)),
 	)
 
 	saveBtn := widget.NewButton("Save & Reload Sway", func() {

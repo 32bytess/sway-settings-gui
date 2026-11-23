@@ -2,8 +2,10 @@ package config
 
 import (
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -180,4 +182,38 @@ func (c *Config) saveBehavior() error {
 		}
 	}
 	return writeLines(BehaviorPath(), out)
+}
+
+// fcListFamilies returns the output of `fc-list : family`. A variable so
+// tests can replace it.
+var fcListFamilies = func() (string, error) {
+	out, err := exec.Command("fc-list", ":", "family").Output()
+	if err != nil {
+		return "", fmt.Errorf("fc-list: %w", err)
+	}
+	return string(out), nil
+}
+
+// FontFamilies lists installed font families, sorted and de-duplicated.
+func FontFamilies() ([]string, error) {
+	out, err := fcListFamilies()
+	if err != nil {
+		return nil, err
+	}
+	return parseFontFamilies(out), nil
+}
+
+func parseFontFamilies(out string) []string {
+	seen := map[string]bool{}
+	var families []string
+	for _, line := range strings.Split(out, "\n") {
+		// fc-list prints localized aliases after commas; keep the first.
+		name := strings.TrimSpace(strings.SplitN(line, ",", 2)[0])
+		if name != "" && !seen[name] {
+			seen[name] = true
+			families = append(families, name)
+		}
+	}
+	sort.Strings(families)
+	return families
 }

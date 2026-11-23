@@ -138,3 +138,12 @@ func TestBorderStyleChangeAndKeep(t *testing.T) {
 	}
 	mustContain(t, readFile(t, AppearancePath()), "default_floating_border pixel 3\n")
 }
+
+func TestParseFontFamilies(t *testing.T) {
+	out := "Noto Sans,Noto Sans Display\nDejaVu Sans Mono\n\nNoto Sans\nCantarell,Cantarell Light\n"
+	got := parseFontFamilies(out)
+	want := []string{"Cantarell", "DejaVu Sans Mono", "Noto Sans"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
