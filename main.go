@@ -42,6 +42,8 @@ func main() {
 		dialog.ShowError(fmt.Errorf("detecting input devices (showing all sections): %w", err), w)
 	}
 
+	layerSurfaces, layerErr := config.DetectLayerSurfaces()
+
 	detected, err := config.DetectOutputs()
 	if err != nil {
 		dialog.ShowError(fmt.Errorf("detecting outputs (showing configured outputs only): %w", err), w)
@@ -59,6 +61,7 @@ func main() {
 		container.NewTabItem("Startup", ui.MakeStartupTab(cfg, w)),
 		container.NewTabItem("Bar", ui.MakeBarTab(cfg, w)),
 		container.NewTabItem("Idle", ui.MakeIdleTab(cfg, w)),
+		container.NewTabItem("Layers", ui.MakeLayersTab(cfg, w, layerSurfaces, layerErr)),
 	)
 
 	saveBtn := widget.NewButton("Save & Reload Sway", func() {

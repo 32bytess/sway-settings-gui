@@ -94,6 +94,10 @@ type Config struct {
 	// Idle is swayidle/swaylock, managed via idle.conf and idle.sh.
 	Idle Idle
 
+	// Layers holds SwayFX layer_effects by namespace (layers.conf).
+	Layers      []LayerEffect
+	layersExtra []string
+
 	// BorderStyle and FloatingBorderStyle are normal, pixel or none; ""
 	// keeps whatever style the config already uses.
 	BorderStyle         string
@@ -232,6 +236,9 @@ func Load() (*Config, error) {
 	}
 	if err := cfg.loadIdle(); err != nil {
 		return nil, fmt.Errorf("idle: %w", err)
+	}
+	if err := cfg.loadLayers(); err != nil {
+		return nil, fmt.Errorf("layers: %w", err)
 	}
 	cfg.markWallpaperSaved()
 	cfg.inputBaseline = copyInputMaps(cfg.Input)
@@ -502,6 +509,9 @@ func (c *Config) validate() error {
 	if err := c.validateIdle(); err != nil {
 		return err
 	}
+	if err := c.validateLayers(); err != nil {
+		return err
+	}
 	if !c.SwayFX {
 		return nil
 	}
@@ -552,6 +562,9 @@ func (c *Config) Save() error {
 	}
 	if err := c.saveIdle(); err != nil {
 		return fmt.Errorf("idle: %w", err)
+	}
+	if err := c.saveLayers(); err != nil {
+		return fmt.Errorf("layers: %w", err)
 	}
 	c.markWallpaperSaved()
 	c.inputBaseline = copyInputMaps(c.Input)
