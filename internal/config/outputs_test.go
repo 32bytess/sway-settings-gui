@@ -322,3 +322,107 @@ func TestValidOutputFormatsAccepted(t *testing.T) {
 		t.Fatalf("valid outputs rejected: %v", err)
 	}
 }
+
+func TestAdvancedOutputSettingsRoundTrip(t *testing.T) {
+	setupHome(t)
+	line := "output eDP-1 hdr on render_bit_depth 10 max_render_time 4 subpixel rgb scale_filter smart allow_tearing yes\n"
+	writeOutputsConf(t, line)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := findOutput(t, cfg, "eDP-1")
+	if o.HDR != "on" || o.RenderBitDepth != "10" || o.MaxRenderTime != "4" || o.Subpixel != "rgb" ||
+		o.ScaleFilter != "smart" || o.AllowTearing != "yes" {
+		t.Fatalf("advanced settings not loaded: %+v", o)
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, OutputsPath()); got != line {
+		t.Fatalf("round trip changed outputs.conf: %q", got)
+	}
+	o.MaxRenderTime = "off"
+	o.HDR = ""
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	want := "output eDP-1 render_bit_depth 10 max_render_time off subpixel rgb scale_filter smart allow_tearing yes\n"
+	if got := readFile(t, OutputsPath()); got != want {
+		t.Fatalf("outputs.conf = %q, want %q", got, want)
+	}
+}
+
+func TestOutputEnableDisable(t *testing.T) {
+	setupHome(t)
+	writeOutputsConf(t, "output HDMI-A-1 disable\n")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := findOutput(t, cfg, "HDMI-A-1")
+	if h.Enabled != "disable" {
+		t.Fatalf("Enabled = %q", h.Enabled)
+	}
+	h.Enabled = "enable"
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, OutputsPath()); got != "output HDMI-A-1 enable\n" {
+		t.Fatalf("outputs.conf = %q", got)
+	}
+	cfg.Outputs = append(cfg.Outputs, Output{Name: "DP-2", Enabled: "disable", Scale: "2"})
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	mustContain(t, readFile(t, OutputsPath()), "output DP-2 scale 2 disable\n")
+}
+
+func TestCannotDisableEveryConnectedOutput(t *testing.T) {
+	setupHome(t)
+	stubOutputs(t, realOutputsJSON, nil)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	detected, err := DetectOutputs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.MergeDetected(detected)
+	findOutput(t, cfg, "eDP-1").Enabled = "disable"
+	if err := cfg.Save(); err == nil {
+		t.Fatal("disabling the only connected display must be refused")
+	}
+
+	// With a second connected display it's allowed.
+	cfg.Outputs = append(cfg.Outputs, Output{Name: "HDMI-A-1", Detected: &DetectedOutput{Name: "HDMI-A-1", Active: true}})
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("disabling one of two displays should be allowed: %v", err)
+	}
+}
+
+func TestAdvancedOutputValidation(t *testing.T) {
+	cases := []func(*Output){
+		func(o *Output) { o.HDR = "maybe" },
+		func(o *Output) { o.RenderBitDepth = "12" },
+		func(o *Output) { o.MaxRenderTime = "-3" },
+		func(o *Output) { o.Subpixel = "diagonal" },
+		func(o *Output) { o.ScaleFilter = "bicubic" },
+		func(o *Output) { o.AllowTearing = "on" },
+		func(o *Output) { o.Enabled = "off" },
+	}
+	for _, mutate := range cases {
+		setupHome(t)
+		cfg, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		o := Output{Name: "DP-9"}
+		mutate(&o)
+		cfg.Outputs = []Output{o}
+		if err := cfg.Save(); err == nil {
+			t.Errorf("expected error for %+v", o)
+		}
+	}
+}

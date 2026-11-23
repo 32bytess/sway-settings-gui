@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -139,6 +140,37 @@ func makeOutputCard(out *config.Output) fyne.CanvasObject {
 		curTransform, curSync = d.Transform, d.AdaptiveSync
 	}
 
+	curEnabled := ""
+	if d != nil {
+		curEnabled = "disable"
+		if d.Active {
+			curEnabled = "enable"
+		}
+	}
+	maxRender := widget.NewSelectEntry([]string{"off", "1", "2", "4", "8"})
+	maxRender.SetPlaceHolder("(not set)")
+	maxRender.SetText(out.MaxRenderTime)
+	maxRender.Validator = func(s string) error {
+		if s == "" || s == "off" {
+			return nil
+		}
+		if n, err := strconv.Atoi(s); err != nil || n <= 0 {
+			return fmt.Errorf("off or milliseconds")
+		}
+		return nil
+	}
+	maxRender.OnChanged = func(s string) { out.MaxRenderTime = s }
+
+	advanced := widget.NewForm(
+		widget.NewFormItem("Enabled", optionalSelect([]string{"enable", "disable"}, &out.Enabled, curEnabled)),
+		widget.NewFormItem("HDR", optionalSelect([]string{"on", "off"}, &out.HDR, "")),
+		widget.NewFormItem("Render bit depth", optionalSelect([]string{"6", "8", "10"}, &out.RenderBitDepth, "")),
+		widget.NewFormItem("Max render time (ms)", maxRender),
+		widget.NewFormItem("Subpixel layout", optionalSelect([]string{"rgb", "bgr", "vrgb", "vbgr", "none"}, &out.Subpixel, "")),
+		widget.NewFormItem("Scale filter", optionalSelect([]string{"linear", "nearest", "smart"}, &out.ScaleFilter, "")),
+		widget.NewFormItem("Allow tearing", optionalSelect([]string{"yes", "no"}, &out.AllowTearing, "")),
+	)
+
 	return container.NewVBox(
 		widget.NewLabelWithStyle(title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		widget.NewForm(
@@ -148,6 +180,7 @@ func makeOutputCard(out *config.Output) fyne.CanvasObject {
 			widget.NewFormItem("Transform", optionalSelect(transformOptions, &out.Transform, curTransform)),
 			widget.NewFormItem("Adaptive sync", optionalSelect(adaptiveSyncOptions, &out.AdaptiveSync, curSync)),
 		),
+		widget.NewAccordion(widget.NewAccordionItem("Advanced", advanced)),
 	)
 }
 

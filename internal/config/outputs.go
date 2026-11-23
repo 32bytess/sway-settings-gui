@@ -21,6 +21,14 @@ type Output struct {
 	Transform    string
 	AdaptiveSync string // "on" or "off"
 
+	HDR            string // on|off
+	RenderBitDepth string // 6|8|10
+	MaxRenderTime  string // off|<msec>
+	Subpixel       string // rgb|bgr|vrgb|vbgr|none
+	ScaleFilter    string // linear|nearest|smart
+	AllowTearing   string // yes|no
+	Enabled        string // enable|disable
+
 	// Detected is the live state from sway, or nil when the output is only
 	// in the config (e.g. a disconnected monitor).
 	Detected *DetectedOutput
@@ -43,7 +51,11 @@ type DetectedOutput struct {
 var WallpaperModes = []string{"fill", "fit", "stretch", "center", "tile", "solid_color"}
 
 // outputFieldOrder is the order settings are written in for a new output.
-var outputFieldOrder = []string{"resolution", "position", "scale", "transform", "adaptive_sync"}
+var outputFieldOrder = []string{
+	"resolution", "position", "scale", "transform", "adaptive_sync",
+	"hdr", "render_bit_depth", "max_render_time", "subpixel", "scale_filter", "allow_tearing",
+	"enabled",
+}
 
 func (o *Output) field(key string) *string {
 	switch key {
@@ -57,6 +69,20 @@ func (o *Output) field(key string) *string {
 		return &o.Transform
 	case "adaptive_sync":
 		return &o.AdaptiveSync
+	case "hdr":
+		return &o.HDR
+	case "render_bit_depth":
+		return &o.RenderBitDepth
+	case "max_render_time":
+		return &o.MaxRenderTime
+	case "subpixel":
+		return &o.Subpixel
+	case "scale_filter":
+		return &o.ScaleFilter
+	case "allow_tearing":
+		return &o.AllowTearing
+	case "enabled":
+		return &o.Enabled
 	}
 	return nil
 }
@@ -190,6 +216,8 @@ func canonicalKey(k string) string {
 		return "position"
 	case "background":
 		return "bg"
+	case "enable", "disable":
+		return "enabled"
 	}
 	return k
 }
@@ -230,7 +258,7 @@ func subcommandArity(key string, rest []string) int {
 	case "scale", "adaptive_sync", "scale_filter", "subpixel", "render_bit_depth",
 		"max_render_time", "hdr", "allow_tearing", "dpms", "power":
 		return 1
-	case "enable", "disable", "toggle":
+	case "enabled", "toggle":
 		return 0
 	}
 	return -1
@@ -306,7 +334,11 @@ func (c *Config) applyOutputLine(ol outputLine) {
 			continue
 		}
 		if f := (&Output{}).field(key); f != nil {
-			*c.outputByName(ol.name).field(key) = joinArgs(s.args)
+			val := joinArgs(s.args)
+			if key == "enabled" {
+				val = s.key // enable or disable
+			}
+			*c.outputByName(ol.name).field(key) = val
 		}
 	}
 }
@@ -353,13 +385,23 @@ func (c *Config) validateOutputs() error {
 			{"position", o.Position, positionRe.MatchString, "X,Y"},
 			{"scale", o.Scale, ValidScale, "a positive number"},
 			{"transform", o.Transform, transformRe.MatchString, "a sway transform"},
-			{"adaptive sync", o.AdaptiveSync, func(v string) bool { return v == "on" || v == "off" }, "on or off"},
+			{"adaptive sync", o.AdaptiveSync, oneOf("on", "off"), "on or off"},
+			{"HDR", o.HDR, oneOf("on", "off"), "on or off"},
+			{"render bit depth", o.RenderBitDepth, oneOf("6", "8", "10"), "6, 8 or 10"},
+			{"max render time", o.MaxRenderTime, func(v string) bool { return v == "off" || validPositiveInt(v) }, "off or milliseconds"},
+			{"subpixel", o.Subpixel, oneOf("rgb", "bgr", "vrgb", "vbgr", "none"), "rgb, bgr, vrgb, vbgr or none"},
+			{"scale filter", o.ScaleFilter, oneOf("linear", "nearest", "smart"), "linear, nearest or smart"},
+			{"allow tearing", o.AllowTearing, oneOf("yes", "no"), "yes or no"},
+			{"enabled", o.Enabled, oneOf("enable", "disable"), "enable or disable"},
 		}
 		for _, ch := range checks {
 			if ch.val != "" && !ch.ok(ch.val) {
 				return fmt.Errorf("output %s: %s %q must be %s", o.Name, ch.name, ch.val, ch.want)
 			}
 		}
+	}
+	if err := c.checkSomeOutputStaysOn(); err != nil {
+		return err
 	}
 	if hasControlChars(c.Wallpaper) {
 		return fmt.Errorf("wallpaper path contains control characters")
@@ -418,7 +460,11 @@ func (c *Config) saveOutputs() error {
 				if val == "" {
 					continue
 				}
-				s.args = strings.Fields(val)
+				if key == "enabled" {
+					s.key, s.args = val, nil
+				} else {
+					s.args = strings.Fields(val)
+				}
 			}
 			kept = append(kept, s)
 		}
@@ -451,10 +497,14 @@ func (c *Config) saveOutputs() error {
 			if seen[k] || val == "" || val == opaque[k] {
 				continue
 			}
+			seg := key + " " + val
+			if key == "enabled" {
+				seg = val
+			}
 			if hasLine {
-				lines = append(lines, fmt.Sprintf("output %s %s %s", quoteArg(out.Name), key, val))
+				lines = append(lines, "output "+quoteArg(out.Name)+" "+seg)
 			} else {
-				combined = append(combined, key, val)
+				combined = append(combined, seg)
 			}
 		}
 		if len(combined) > 0 {
@@ -462,4 +512,37 @@ func (c *Config) saveOutputs() error {
 		}
 	}
 	return writeLines(OutputsPath(), lines)
+}
+
+func oneOf(options ...string) func(string) bool {
+	return func(v string) bool {
+		for _, o := range options {
+			if v == o {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+// checkSomeOutputStaysOn refuses a config that would disable every
+// connected display, which would leave no way to undo it from the desktop.
+func (c *Config) checkSomeOutputStaysOn() error {
+	disabling := false
+	on := 0
+	for _, o := range c.Outputs {
+		if o.Detected == nil {
+			continue
+		}
+		switch {
+		case o.Enabled == "disable":
+			disabling = true
+		case o.Enabled == "enable" || o.Detected.Active:
+			on++
+		}
+	}
+	if disabling && on == 0 {
+		return fmt.Errorf("this would disable every connected display; keep at least one enabled")
+	}
+	return nil
 }
