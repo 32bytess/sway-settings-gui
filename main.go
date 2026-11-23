@@ -83,6 +83,7 @@ func showSettings(a fyne.App, w fyne.Window, selected int) {
 		container.NewTabItem("Input", ui.MakeInputTab(cfg, l.inputTypes, l.inputDevices, l.inputDevErr)),
 		container.NewTabItem("Behavior", ui.MakeBehaviorTab(cfg, w)),
 		container.NewTabItem("Bindings", ui.MakeBindingsTab(cfg, w)),
+		container.NewTabItem("Workspaces", ui.MakeWorkspacesTab(cfg)),
 		container.NewTabItem("Rules", ui.MakeRulesTab(cfg, w)),
 		container.NewTabItem("Startup", ui.MakeStartupTab(cfg, w)),
 		container.NewTabItem("Bar", ui.MakeBarTab(cfg, w)),

@@ -95,6 +95,11 @@ type Config struct {
 	// Idle is swayidle/swaylock, managed via idle.conf and idle.sh.
 	Idle Idle
 
+	// Workspaces are numbered workspaces' names, outputs and gaps.
+	Workspaces []Workspace
+	wsMain     map[string]wsValues
+	wsExtra    []string
+
 	// Layers holds SwayFX layer_effects by namespace (layers.conf).
 	Layers      []LayerEffect
 	layersExtra []string
@@ -202,6 +207,7 @@ func Default() *Config {
 	cfg.vars = map[string]string{}
 	cfg.Bar = newBar()
 	cfg.Idle = defaultIdle()
+	cfg.wsMain = map[string]wsValues{}
 	return cfg
 }
 
@@ -240,6 +246,9 @@ func Load() (*Config, error) {
 	}
 	if err := cfg.loadLayers(); err != nil {
 		return nil, fmt.Errorf("layers: %w", err)
+	}
+	if err := cfg.loadWorkspaces(); err != nil {
+		return nil, fmt.Errorf("workspaces: %w", err)
 	}
 	cfg.markWallpaperSaved()
 	cfg.inputBaseline = copyInputMaps(cfg.Input)
@@ -289,6 +298,7 @@ func (c *Config) loadMain() error {
 	c.readRules(splitLines(string(data)), MainConfigPath())
 	c.readStartup(splitLines(string(data)), MainConfigPath())
 	c.Bar.OtherBars += countBars(splitLines(string(data)))
+	c.readMainWorkspaces(splitLines(string(data)))
 	return nil
 }
 
@@ -513,6 +523,9 @@ func (c *Config) validate() error {
 	if err := c.validateLayers(); err != nil {
 		return err
 	}
+	if err := c.validateWorkspaces(); err != nil {
+		return err
+	}
 	if !c.SwayFX {
 		return nil
 	}
@@ -566,6 +579,9 @@ func (c *Config) Save() error {
 	}
 	if err := c.saveLayers(); err != nil {
 		return fmt.Errorf("layers: %w", err)
+	}
+	if err := c.saveWorkspaces(); err != nil {
+		return fmt.Errorf("workspaces: %w", err)
 	}
 	c.markWallpaperSaved()
 	c.inputBaseline = copyInputMaps(c.Input)
