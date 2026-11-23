@@ -60,6 +60,12 @@ type Config struct {
 	savedWallpaper     string
 	savedWallpaperMode string
 
+	// Input holds `input <type:...> <key> <value>` settings by identifier
+	// and key; "" means not set. inputBaseline is the state as last loaded
+	// or saved, so only changed settings are written.
+	Input         map[string]map[string]string
+	inputBaseline map[string]map[string]string
+
 	// LXQtDesktop is true when pcmanfm-qt draws the desktop over sway's
 	// wallpaper; set by the caller (see LXQtDesktopRunning).
 	LXQtDesktop bool
@@ -125,7 +131,8 @@ func MainConfigPath() string {
 func AppearancePath() string { return filepath.Join(SwayConfigDir(), "config.d", "appearance.conf") }
 func OutputsPath() string    { return filepath.Join(SwayConfigDir(), "config.d", "outputs.conf") }
 
-func Load() (*Config, error) {
+// Default returns a Config holding the app's defaults, before any file is read.
+func Default() *Config {
 	cfg := &Config{
 		ModKey:       "Mod4",
 		Terminal:     "kitty",
@@ -152,6 +159,12 @@ func Load() (*Config, error) {
 		DimUrgentColor:    "#900000FF",
 		TitlebarSeparator: true,
 	}
+	cfg.Input = newInputMaps()
+	return cfg
+}
+
+func Load() (*Config, error) {
+	cfg := Default()
 	if err := cfg.loadMain(); err != nil {
 		return nil, fmt.Errorf("main config: %w", err)
 	}
@@ -161,7 +174,11 @@ func Load() (*Config, error) {
 	if err := cfg.loadOutputs(); err != nil {
 		return nil, fmt.Errorf("outputs: %w", err)
 	}
+	if err := cfg.loadInputs(); err != nil {
+		return nil, fmt.Errorf("input: %w", err)
+	}
 	cfg.markWallpaperSaved()
+	cfg.inputBaseline = copyInputMaps(cfg.Input)
 	return cfg, nil
 }
 
@@ -202,6 +219,7 @@ func (c *Config) loadMain() error {
 			}
 		}
 	}
+	c.readInputs(splitLines(string(data)))
 	return nil
 }
 
@@ -391,6 +409,9 @@ func (c *Config) validate() error {
 	if err := c.validateOutputs(); err != nil {
 		return err
 	}
+	if err := c.validateInputs(); err != nil {
+		return err
+	}
 	if !c.SwayFX {
 		return nil
 	}
@@ -420,7 +441,11 @@ func (c *Config) Save() error {
 	if err := c.saveOutputs(); err != nil {
 		return fmt.Errorf("outputs: %w", err)
 	}
+	if err := c.saveInputs(); err != nil {
+		return fmt.Errorf("input: %w", err)
+	}
 	c.markWallpaperSaved()
+	c.inputBaseline = copyInputMaps(c.Input)
 	return nil
 }
 

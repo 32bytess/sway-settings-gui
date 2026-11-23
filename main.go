@@ -22,7 +22,7 @@ func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		dialog.ShowError(fmt.Errorf("failed to load config: %w", err), w)
-		cfg = &config.Config{ModKey: "Mod4", Terminal: "kitty", Opacity: 1.0}
+		cfg = config.Default()
 	}
 
 	swayFX, err := config.DetectSwayFX()
@@ -37,6 +37,11 @@ func main() {
 	}
 	cfg.LXQtDesktop = lxqtDesktop
 
+	inputTypes, err := config.DetectInputTypes()
+	if err != nil {
+		dialog.ShowError(fmt.Errorf("detecting input devices (showing all sections): %w", err), w)
+	}
+
 	detected, err := config.DetectOutputs()
 	if err != nil {
 		dialog.ShowError(fmt.Errorf("detecting outputs (showing configured outputs only): %w", err), w)
@@ -47,6 +52,7 @@ func main() {
 		container.NewTabItem("Variables", ui.MakeVariablesTab(cfg, w)),
 		container.NewTabItem("Appearance", container.NewVScroll(ui.MakeAppearanceTab(cfg))),
 		container.NewTabItem("Outputs", ui.MakeOutputsTab(cfg, w)),
+		container.NewTabItem("Input", ui.MakeInputTab(cfg, inputTypes)),
 	)
 
 	saveBtn := widget.NewButton("Save & Reload Sway", func() {
