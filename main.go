@@ -54,12 +54,17 @@ func main() {
 		container.NewTabItem("Outputs", ui.MakeOutputsTab(cfg, w)),
 		container.NewTabItem("Input", ui.MakeInputTab(cfg, inputTypes)),
 		container.NewTabItem("Behavior", ui.MakeBehaviorTab(cfg, w)),
+		container.NewTabItem("Bindings", ui.MakeBindingsTab(cfg, w)),
 	)
 
 	saveBtn := widget.NewButton("Save & Reload Sway", func() {
 		wallpaperChanged := cfg.WallpaperChanged()
 		if err := cfg.Save(); err != nil {
 			dialog.ShowError(err, w)
+			return
+		}
+		if err := config.CheckConfig(); err != nil {
+			dialog.ShowError(fmt.Errorf("saved, but Sway was NOT reloaded because the config has errors: %w", err), w)
 			return
 		}
 		if err := exec.Command("swaymsg", "reload").Run(); err != nil {

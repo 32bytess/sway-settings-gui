@@ -71,6 +71,13 @@ type Config struct {
 	Behavior         map[string]string
 	behaviorBaseline map[string]string
 
+	// Bindings are default-mode key bindings: the main config's (read-only)
+	// with changes from bindings.conf applied. vars holds `set $name value`
+	// from the main config, for comparing combos.
+	Bindings      []BindingEntry
+	bindingsExtra []string
+	vars          map[string]string
+
 	// BorderStyle and FloatingBorderStyle are normal, pixel or none; ""
 	// keeps whatever style the config already uses.
 	BorderStyle         string
@@ -171,6 +178,7 @@ func Default() *Config {
 	}
 	cfg.Input = newInputMaps()
 	cfg.Behavior = map[string]string{}
+	cfg.vars = map[string]string{}
 	return cfg
 }
 
@@ -192,6 +200,9 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("behavior: %w", err)
 	}
 	cfg.behaviorBaseline = copyStringMap(cfg.Behavior)
+	if err := cfg.loadBindings(); err != nil {
+		return nil, fmt.Errorf("bindings: %w", err)
+	}
 	cfg.markWallpaperSaved()
 	cfg.inputBaseline = copyInputMaps(cfg.Input)
 	return cfg, nil
@@ -236,6 +247,7 @@ func (c *Config) loadMain() error {
 	}
 	c.readInputs(splitLines(string(data)))
 	c.readBehavior(splitLines(string(data)))
+	c.readMainBindings(splitLines(string(data)))
 	return nil
 }
 
@@ -442,6 +454,9 @@ func (c *Config) validate() error {
 	if err := c.validateBehavior(); err != nil {
 		return err
 	}
+	if err := c.validateBindings(); err != nil {
+		return err
+	}
 	if !c.SwayFX {
 		return nil
 	}
@@ -478,6 +493,9 @@ func (c *Config) Save() error {
 		return fmt.Errorf("behavior: %w", err)
 	}
 	c.behaviorBaseline = copyStringMap(c.Behavior)
+	if err := c.saveBindings(); err != nil {
+		return fmt.Errorf("bindings: %w", err)
+	}
 	c.markWallpaperSaved()
 	c.inputBaseline = copyInputMaps(c.Input)
 	return nil
