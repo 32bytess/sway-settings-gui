@@ -43,19 +43,32 @@ func MakeAppearanceTab(cfg *config.Config) fyne.CanvasObject {
 	)
 	if !cfg.SwayFX {
 		box.Add(widget.NewSeparator())
-		box.Add(widget.NewLabel("Corner radius, blur and dimming need SwayFX (not detected)."))
+		box.Add(widget.NewLabel("Corner radius, blur, shadows, dimming and title bar\nseparator settings need SwayFX (not detected)."))
 		return box
 	}
 
 	blurCheck := widget.NewCheck("Enable blur", func(v bool) { cfg.BlurEnabled = v })
 	blurCheck.SetChecked(cfg.BlurEnabled)
 
+	checkbox := func(label string, get func() bool, set func(bool)) *widget.Check {
+		c := widget.NewCheck(label, set)
+		c.SetChecked(get())
+		return c
+	}
+
 	box.Add(intRow("Corner radius (px)", 0, 30, func() int { return cfg.CornerRadius }, func(v int) { cfg.CornerRadius = v }))
+	box.Add(checkbox("Round corners only when there are gaps", func() bool { return cfg.SmartCornerRadius }, func(v bool) { cfg.SmartCornerRadius = v }))
+	box.Add(checkbox("Separator between title bar and window", func() bool { return cfg.TitlebarSeparator }, func(v bool) { cfg.TitlebarSeparator = v }))
 	box.Add(widget.NewSeparator())
 	box.Add(widget.NewLabelWithStyle("Blur", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
 	box.Add(blurCheck)
 	box.Add(intRow("Blur passes", 1, 10, func() int { return cfg.BlurPasses }, func(v int) { cfg.BlurPasses = v }))
 	box.Add(intRow("Blur radius", 1, 20, func() int { return cfg.BlurRadius }, func(v int) { cfg.BlurRadius = v }))
+	box.Add(checkbox("X-ray (blur only the wallpaper)", func() bool { return cfg.BlurXray }, func(v bool) { cfg.BlurXray = v }))
+	box.Add(floatRow("Blur noise", 0, 1, 0.01, func() float64 { return cfg.BlurNoise }, func(v float64) { cfg.BlurNoise = v }))
+	box.Add(floatRow("Blur brightness", 0, 2, 0.05, func() float64 { return cfg.BlurBrightness }, func(v float64) { cfg.BlurBrightness = v }))
+	box.Add(floatRow("Blur contrast", 0, 2, 0.05, func() float64 { return cfg.BlurContrast }, func(v float64) { cfg.BlurContrast = v }))
+	box.Add(floatRow("Blur saturation", 0, 2, 0.05, func() float64 { return cfg.BlurSaturation }, func(v float64) { cfg.BlurSaturation = v }))
 	colorEntry := func(get func() string, set func(string)) *widget.Entry {
 		e := widget.NewEntry()
 		e.SetPlaceHolder("#RRGGBBAA")
@@ -90,6 +103,8 @@ func MakeAppearanceTab(cfg *config.Config) fyne.CanvasObject {
 
 	box.Add(widget.NewSeparator())
 	box.Add(widget.NewLabelWithStyle("Inactive Windows", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
-	box.Add(floatRow("Dim inactive", 0, 0.5, 0.05, func() float64 { return cfg.DimInactive }, func(v float64) { cfg.DimInactive = v }))
+	box.Add(floatRow("Dim inactive", 0, 1, 0.05, func() float64 { return cfg.DimInactive }, func(v float64) { cfg.DimInactive = v }))
+	box.Add(labeled("Dim color", colorEntry(func() string { return cfg.DimUnfocusedColor }, func(v string) { cfg.DimUnfocusedColor = v })))
+	box.Add(labeled("Dim color (urgent)", colorEntry(func() string { return cfg.DimUrgentColor }, func(v string) { cfg.DimUrgentColor = v })))
 	return box
 }

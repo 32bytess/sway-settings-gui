@@ -36,10 +36,20 @@ type Config struct {
 	ShadowOffsetX       int
 	ShadowOffsetY       int
 
+	SmartCornerRadius bool
+	BlurXray          bool
+	BlurNoise         float64
+	BlurBrightness    float64
+	BlurContrast      float64
+	BlurSaturation    float64
+	DimUnfocusedColor string
+	DimUrgentColor    string
+	TitlebarSeparator bool
+
 	Outputs []Output
 
 	// SwayFX reports whether the compositor accepts SwayFX-only commands
-	// (corner_radius, blur*, shadow*, default_dim_inactive). When false they are
+	// (corner_radius, blur*, shadow*, dim*, titlebar_separator, ...). When false they are
 	// neither written nor kept, since plain sway rejects them.
 	SwayFX bool
 }
@@ -123,6 +133,15 @@ func Load() (*Config, error) {
 		ShadowBlurRadius:    20,
 		ShadowColor:         "#0000007F",
 		ShadowInactiveColor: "#0000007F",
+
+		SmartCornerRadius: true,
+		BlurNoise:         0.02,
+		BlurBrightness:    0.9,
+		BlurContrast:      0.9,
+		BlurSaturation:    1.1,
+		DimUnfocusedColor: "#000000FF",
+		DimUrgentColor:    "#900000FF",
+		TitlebarSeparator: true,
 	}
 	if err := cfg.loadMain(); err != nil {
 		return nil, fmt.Errorf("main config: %w", err)
@@ -214,6 +233,33 @@ func (c *Config) loadAppearance() error {
 		}
 		if m := regexp.MustCompile(`^shadow_inactive_color (#[0-9A-Fa-f]+)`).FindStringSubmatch(line); m != nil {
 			c.ShadowInactiveColor = m[1]
+		}
+		for name, dst := range map[string]*bool{
+			"smart_corner_radius": &c.SmartCornerRadius,
+			"blur_xray":           &c.BlurXray,
+			"titlebar_separator":  &c.TitlebarSeparator,
+		} {
+			if m := regexp.MustCompile(`^` + name + ` (enable|disable)$`).FindStringSubmatch(line); m != nil {
+				*dst = m[1] == "enable"
+			}
+		}
+		for name, dst := range map[string]*float64{
+			"blur_noise":      &c.BlurNoise,
+			"blur_brightness": &c.BlurBrightness,
+			"blur_contrast":   &c.BlurContrast,
+			"blur_saturation": &c.BlurSaturation,
+		} {
+			if m := regexp.MustCompile(`^` + name + ` ([0-9.]+)`).FindStringSubmatch(line); m != nil {
+				*dst, _ = strconv.ParseFloat(m[1], 64)
+			}
+		}
+		for name, dst := range map[string]*string{
+			`dim_inactive_colors\.unfocused`: &c.DimUnfocusedColor,
+			`dim_inactive_colors\.urgent`:    &c.DimUrgentColor,
+		} {
+			if m := regexp.MustCompile(`^` + name + ` (#[0-9A-Fa-f]+)`).FindStringSubmatch(line); m != nil {
+				*dst = m[1]
+			}
 		}
 		if m := regexp.MustCompile(`^shadow_offset (-?\d+) (-?\d+)`).FindStringSubmatch(line); m != nil {
 			c.ShadowOffsetX, _ = strconv.Atoi(m[1])
@@ -343,7 +389,12 @@ func (c *Config) validate() error {
 	if !c.SwayFX {
 		return nil
 	}
-	for name, v := range map[string]string{"shadow color": c.ShadowColor, "inactive shadow color": c.ShadowInactiveColor} {
+	for name, v := range map[string]string{
+		"shadow color":          c.ShadowColor,
+		"inactive shadow color": c.ShadowInactiveColor,
+		"inactive dim color":    c.DimUnfocusedColor,
+		"urgent dim color":      c.DimUrgentColor,
+	} {
 		if !ValidHexColor(v) {
 			return fmt.Errorf("%s %q must be #RRGGBB or #RRGGBBAA", name, v)
 		}
@@ -386,7 +437,7 @@ func (c *Config) saveMain() error {
 		{regexp.MustCompile(`^set \$mod `), fmt.Sprintf("set $mod %s", c.ModKey), nil},
 		{regexp.MustCompile(`^set \$term `), fmt.Sprintf("set $term %s", c.Terminal), nil},
 		{regexp.MustCompile(`^set \$menu `), fmt.Sprintf("set $menu %s", c.Menu), nil},
-		{regexp.MustCompile(`^set \$opacity `), "set $opacity " + strconv.FormatFloat(math.Round(c.Opacity*100)/100, 'f', -1, 64), nil},
+		{regexp.MustCompile(`^set \$opacity `), "set $opacity " + formatFloat(c.Opacity), nil},
 	})
 	// Variables must be defined before use, so missing ones go at the top.
 	lines = append(missing, lines...)
@@ -434,6 +485,11 @@ func ensureOpacityRule(lines []string) []string {
 	return append(out, lines[setAt+1:]...)
 }
 
+// formatFloat rounds to two decimals and drops trailing zeros.
+func formatFloat(f float64) string {
+	return strconv.FormatFloat(math.Round(f*100)/100, 'f', -1, 64)
+}
+
 func enableDisable(b bool) string {
 	if b {
 		return "enable"
@@ -464,6 +520,15 @@ func (c *Config) saveAppearance() error {
 		{regexp.MustCompile(`^shadow_color `), "shadow_color " + c.ShadowColor, nil},
 		{regexp.MustCompile(`^shadow_inactive_color `), "shadow_inactive_color " + c.ShadowInactiveColor, nil},
 		{regexp.MustCompile(`^shadow_offset `), fmt.Sprintf("shadow_offset %d %d", c.ShadowOffsetX, c.ShadowOffsetY), nil},
+		{regexp.MustCompile(`^smart_corner_radius (enable|disable)$`), "smart_corner_radius " + enableDisable(c.SmartCornerRadius), nil},
+		{regexp.MustCompile(`^blur_xray (enable|disable)$`), "blur_xray " + enableDisable(c.BlurXray), nil},
+		{regexp.MustCompile(`^blur_noise `), "blur_noise " + formatFloat(c.BlurNoise), nil},
+		{regexp.MustCompile(`^blur_brightness `), "blur_brightness " + formatFloat(c.BlurBrightness), nil},
+		{regexp.MustCompile(`^blur_contrast `), "blur_contrast " + formatFloat(c.BlurContrast), nil},
+		{regexp.MustCompile(`^blur_saturation `), "blur_saturation " + formatFloat(c.BlurSaturation), nil},
+		{regexp.MustCompile(`^dim_inactive_colors\.unfocused `), "dim_inactive_colors.unfocused " + c.DimUnfocusedColor, nil},
+		{regexp.MustCompile(`^dim_inactive_colors\.urgent `), "dim_inactive_colors.urgent " + c.DimUrgentColor, nil},
+		{regexp.MustCompile(`^titlebar_separator (enable|disable)$`), "titlebar_separator " + enableDisable(c.TitlebarSeparator), nil},
 	}
 	if c.SwayFX {
 		return replaceInFile(AppearancePath(), append(common, swayFX...))

@@ -468,3 +468,98 @@ func TestSaveKeepsBorderNone(t *testing.T) {
 		t.Fatalf("'none' border should be left alone:\n%s", app)
 	}
 }
+
+func TestLoadParsesMoreSwayFXEffects(t *testing.T) {
+	setupHome(t)
+	if err := os.MkdirAll(filepath.Dir(AppearancePath()), 0755); err != nil {
+		t.Fatal(err)
+	}
+	app := "smart_corner_radius disable\nblur_xray enable\nblur_noise 0.05\nblur_brightness 1.2\nblur_contrast 0.8\nblur_saturation 1.5\n" +
+		"dim_inactive_colors.unfocused #11111111\ndim_inactive_colors.urgent #22222222\ntitlebar_separator disable\n"
+	if err := os.WriteFile(AppearancePath(), []byte(app), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SmartCornerRadius || !cfg.BlurXray || cfg.BlurNoise != 0.05 || cfg.BlurBrightness != 1.2 ||
+		cfg.BlurContrast != 0.8 || cfg.BlurSaturation != 1.5 || cfg.DimUnfocusedColor != "#11111111" ||
+		cfg.DimUrgentColor != "#22222222" || cfg.TitlebarSeparator {
+		t.Fatalf("SwayFX effects not parsed: %+v", cfg)
+	}
+}
+
+func TestLoadMoreSwayFXEffectDefaults(t *testing.T) {
+	setupHome(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.SmartCornerRadius || cfg.BlurXray || cfg.BlurNoise != 0.02 || cfg.BlurBrightness != 0.9 ||
+		cfg.BlurContrast != 0.9 || cfg.BlurSaturation != 1.1 || cfg.DimUnfocusedColor != "#000000FF" ||
+		cfg.DimUrgentColor != "#900000FF" || !cfg.TitlebarSeparator {
+		t.Fatalf("unexpected SwayFX effect defaults: %+v", cfg)
+	}
+}
+
+func TestSaveSwayFXWritesMoreEffects(t *testing.T) {
+	setupHome(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.SwayFX = true
+	cfg.BlurXray = true
+	cfg.BlurNoise = 0.1
+	cfg.BlurSaturation = 1.30000000001
+	cfg.DimUrgentColor = "#FF0000AA"
+	cfg.TitlebarSeparator = false
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	app := readFile(t, AppearancePath())
+	for _, want := range []string{"smart_corner_radius enable\n", "blur_xray enable\n", "blur_noise 0.1\n", "blur_brightness 0.9\n",
+		"blur_contrast 0.9\n", "blur_saturation 1.3\n", "dim_inactive_colors.unfocused #000000FF\n",
+		"dim_inactive_colors.urgent #FF0000AA\n", "titlebar_separator disable\n"} {
+		mustContain(t, app, want)
+	}
+}
+
+func TestSavePlainSwayRemovesMoreEffects(t *testing.T) {
+	setupHome(t)
+	if err := os.MkdirAll(filepath.Dir(AppearancePath()), 0755); err != nil {
+		t.Fatal(err)
+	}
+	app := "gaps inner 4\nsmart_corner_radius enable\nblur_xray enable\nblur_noise 0.02\ndim_inactive_colors.urgent #900000FF\ntitlebar_separator enable\n"
+	if err := os.WriteFile(AppearancePath(), []byte(app), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.SwayFX = false
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	got := readFile(t, AppearancePath())
+	for _, bad := range []string{"smart_corner_radius", "blur_xray", "blur_noise", "dim_inactive_colors", "titlebar_separator"} {
+		if strings.Contains(got, bad) {
+			t.Fatalf("plain sway config should not contain %q:\n%s", bad, got)
+		}
+	}
+}
+
+func TestSaveRejectsInvalidDimColor(t *testing.T) {
+	setupHome(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.SwayFX = true
+	cfg.DimUnfocusedColor = "#12"
+	if err := cfg.Save(); err == nil {
+		t.Fatal("expected error for invalid dim color")
+	}
+}
