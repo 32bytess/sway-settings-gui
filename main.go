@@ -53,6 +53,7 @@ func main() {
 		container.NewTabItem("Appearance", container.NewVScroll(ui.MakeAppearanceTab(cfg))),
 		container.NewTabItem("Outputs", ui.MakeOutputsTab(cfg, w)),
 		container.NewTabItem("Input", ui.MakeInputTab(cfg, inputTypes)),
+		container.NewTabItem("Behavior", ui.MakeBehaviorTab(cfg)),
 	)
 
 	saveBtn := widget.NewButton("Save & Reload Sway", func() {

@@ -16,11 +16,11 @@ var inputTitles = map[string]string{
 	config.Pointer:  "Mouse / pointer",
 }
 
-// inputWidget builds the control for one setting. Choices use a Select with
+// settingWidget builds the control for one setting. Choices use a Select with
 // "(not set)" until something is picked, so untouched settings aren't saved;
 // free-form values use an Entry validated against the spec (and an empty
 // entry removes a line the app wrote earlier).
-func inputWidget(values map[string]string, spec config.InputSpec, layouts []string) fyne.CanvasObject {
+func settingWidget(values map[string]string, spec config.SettingSpec, suggestions []string) fyne.CanvasObject {
 	if spec.Options != nil {
 		sel := widget.NewSelect(spec.Options, nil)
 		sel.PlaceHolder = "(not set)"
@@ -37,8 +37,8 @@ func inputWidget(values map[string]string, spec config.InputSpec, layouts []stri
 		}
 		return nil
 	}
-	if spec.Key == "xkb_layout" && len(layouts) > 0 {
-		e := widget.NewSelectEntry(layouts)
+	if len(suggestions) > 0 {
+		e := widget.NewSelectEntry(suggestions)
 		e.SetPlaceHolder(spec.Hint)
 		e.SetText(values[spec.Key])
 		e.Validator = validator
@@ -73,7 +73,11 @@ func MakeInputTab(cfg *config.Config, present map[string]bool) fyne.CanvasObject
 		box.Add(widget.NewLabelWithStyle(inputTitles[ident], fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
 		form := widget.NewForm()
 		for _, spec := range config.InputSpecs[ident] {
-			form.Append(spec.Label, inputWidget(cfg.Input[ident], spec, layouts))
+			var suggestions []string
+			if spec.Key == "xkb_layout" {
+				suggestions = layouts
+			}
+			form.Append(spec.Label, settingWidget(cfg.Input[ident], spec, suggestions))
 		}
 		box.Add(form)
 	}

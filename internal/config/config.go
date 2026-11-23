@@ -66,6 +66,16 @@ type Config struct {
 	Input         map[string]map[string]string
 	inputBaseline map[string]map[string]string
 
+	// Behavior holds top-level look/behaviour commands (font, client.*,
+	// focus_follows_mouse, ...) by command; "" means not set.
+	Behavior         map[string]string
+	behaviorBaseline map[string]string
+
+	// BorderStyle and FloatingBorderStyle are normal, pixel or none; ""
+	// keeps whatever style the config already uses.
+	BorderStyle         string
+	FloatingBorderStyle string
+
 	// LXQtDesktop is true when pcmanfm-qt draws the desktop over sway's
 	// wallpaper; set by the caller (see LXQtDesktopRunning).
 	LXQtDesktop bool
@@ -160,6 +170,7 @@ func Default() *Config {
 		TitlebarSeparator: true,
 	}
 	cfg.Input = newInputMaps()
+	cfg.Behavior = map[string]string{}
 	return cfg
 }
 
@@ -177,6 +188,10 @@ func Load() (*Config, error) {
 	if err := cfg.loadInputs(); err != nil {
 		return nil, fmt.Errorf("input: %w", err)
 	}
+	if err := cfg.loadBehavior(); err != nil {
+		return nil, fmt.Errorf("behavior: %w", err)
+	}
+	cfg.behaviorBaseline = copyStringMap(cfg.Behavior)
 	cfg.markWallpaperSaved()
 	cfg.inputBaseline = copyInputMaps(cfg.Input)
 	return cfg, nil
@@ -220,6 +235,7 @@ func (c *Config) loadMain() error {
 		}
 	}
 	c.readInputs(splitLines(string(data)))
+	c.readBehavior(splitLines(string(data)))
 	return nil
 }
 
@@ -241,6 +257,12 @@ func (c *Config) loadAppearance() error {
 		}
 		if m := regexp.MustCompile(`^corner_radius (\d+)`).FindStringSubmatch(line); m != nil {
 			c.CornerRadius, _ = strconv.Atoi(m[1])
+		}
+		if m := regexp.MustCompile(`^default_border (normal|pixel|none)\b`).FindStringSubmatch(line); m != nil {
+			c.BorderStyle = m[1]
+		}
+		if m := regexp.MustCompile(`^default_floating_border (normal|pixel|none)\b`).FindStringSubmatch(line); m != nil {
+			c.FloatingBorderStyle = m[1]
 		}
 		if m := regexp.MustCompile(`^default_border (?:normal|pixel) (\d+)`).FindStringSubmatch(line); m != nil {
 			c.BorderSize, _ = strconv.Atoi(m[1])
@@ -331,10 +353,11 @@ func readOptional(path string) (data []byte, exists bool, err error) {
 // splitLines splits content into lines, dropping the empty element produced
 // by a trailing newline.
 func splitLines(content string) []string {
+	content = strings.TrimSuffix(content, "\n")
 	if content == "" {
 		return nil
 	}
-	return strings.Split(strings.TrimSuffix(content, "\n"), "\n")
+	return strings.Split(content, "\n")
 }
 
 func leadingIndent(line string) string {
@@ -376,7 +399,11 @@ func writeLines(path string, lines []string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0644)
+	content := ""
+	if len(lines) > 0 {
+		content = strings.Join(lines, "\n") + "\n"
+	}
+	return os.WriteFile(path, []byte(content), 0644)
 }
 
 // replaceInFile updates matching lines in path, appending settings that are
@@ -412,6 +439,9 @@ func (c *Config) validate() error {
 	if err := c.validateInputs(); err != nil {
 		return err
 	}
+	if err := c.validateBehavior(); err != nil {
+		return err
+	}
 	if !c.SwayFX {
 		return nil
 	}
@@ -444,6 +474,10 @@ func (c *Config) Save() error {
 	if err := c.saveInputs(); err != nil {
 		return fmt.Errorf("input: %w", err)
 	}
+	if err := c.saveBehavior(); err != nil {
+		return fmt.Errorf("behavior: %w", err)
+	}
+	c.behaviorBaseline = copyStringMap(c.Behavior)
 	c.markWallpaperSaved()
 	c.inputBaseline = copyInputMaps(c.Input)
 	return nil
@@ -479,20 +513,38 @@ func (c *Config) saveMain() error {
 	return writeLines(path, lines)
 }
 
-// borderReplacement updates the width of a default_border-style command
-// while keeping its style: "normal N" stays normal, "pixel N" stays pixel,
-// and styles without a width (none, csd) are left untouched. When the command
-// is absent, "pixel N" is added.
-func borderReplacement(cmd string, size int) replacement {
+// borderReplacement writes a default_border-style command. style is normal,
+// pixel or none; "" keeps the style already in the file (styles the app
+// doesn't manage, like csd, are left untouched). When the command is absent
+// it is added, as pixel unless a style was chosen.
+func borderReplacement(cmd, style string, size int) replacement {
+	line := func(st string) string {
+		if st == "none" {
+			return cmd + " none"
+		}
+		return fmt.Sprintf("%s %s %d", cmd, st, size)
+	}
+	val := line("pixel")
+	if style != "" {
+		val = line(style)
+	}
 	return replacement{
 		re:  regexp.MustCompile(`^` + cmd + `(\s|$)`),
-		val: fmt.Sprintf("%s pixel %d", cmd, size),
+		val: val,
 		rewrite: func(trimmed string) string {
 			fields := strings.Fields(trimmed)
-			if len(fields) < 2 || (fields[1] != "normal" && fields[1] != "pixel") {
+			if len(fields) < 2 {
 				return trimmed
 			}
-			return fmt.Sprintf("%s %s %d", cmd, fields[1], size)
+			st := style
+			if st == "" {
+				st = fields[1]
+			}
+			switch st {
+			case "normal", "pixel", "none":
+				return line(st)
+			}
+			return trimmed
 		},
 	}
 }
@@ -536,8 +588,8 @@ func (c *Config) saveAppearance() error {
 	common := []replacement{
 		{regexp.MustCompile(`^gaps inner \d+`), fmt.Sprintf("gaps inner %d", c.GapsInner), nil},
 		{regexp.MustCompile(`^gaps outer \d+`), fmt.Sprintf("gaps outer %d", c.GapsOuter), nil},
-		borderReplacement("default_border", c.BorderSize),
-		borderReplacement("default_floating_border", c.BorderSize),
+		borderReplacement("default_border", c.BorderStyle, c.BorderSize),
+		borderReplacement("default_floating_border", c.FloatingBorderStyle, c.BorderSize),
 	}
 	swayFX := []replacement{
 		{regexp.MustCompile(`^corner_radius \d+`), fmt.Sprintf("corner_radius %d", c.CornerRadius), nil},

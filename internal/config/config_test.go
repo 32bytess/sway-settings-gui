@@ -563,3 +563,16 @@ func TestSaveRejectsInvalidDimColor(t *testing.T) {
 		t.Fatal("expected error for invalid dim color")
 	}
 }
+
+func TestEmptyFileRoundTripsWithoutBlankLines(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "x.conf")
+	if err := writeLines(path, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, path); got != "" {
+		t.Fatalf("empty file content = %q, want empty", got)
+	}
+	if got := splitLines("\n"); len(got) != 0 {
+		t.Fatalf("splitLines(\"\\n\") = %q, want no lines", got)
+	}
+}

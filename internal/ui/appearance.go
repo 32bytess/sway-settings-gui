@@ -40,6 +40,8 @@ func MakeAppearanceTab(cfg *config.Config) fyne.CanvasObject {
 		intRow("Gaps inner (px)", 0, 50, func() int { return cfg.GapsInner }, func(v int) { cfg.GapsInner = v }),
 		intRow("Gaps outer (px)", 0, 50, func() int { return cfg.GapsOuter }, func(v int) { cfg.GapsOuter = v }),
 		intRow("Border width (px)", 0, 5, func() int { return cfg.BorderSize }, func(v int) { cfg.BorderSize = v }),
+		borderStyleRow("Window border style", &cfg.BorderStyle),
+		borderStyleRow("Floating border style", &cfg.FloatingBorderStyle),
 	)
 	if !cfg.SwayFX {
 		box.Add(widget.NewSeparator())
@@ -107,4 +109,16 @@ func MakeAppearanceTab(cfg *config.Config) fyne.CanvasObject {
 	box.Add(labeled("Dim color", colorEntry(func() string { return cfg.DimUnfocusedColor }, func(v string) { cfg.DimUnfocusedColor = v })))
 	box.Add(labeled("Dim color (urgent)", colorEntry(func() string { return cfg.DimUrgentColor }, func(v string) { cfg.DimUrgentColor = v })))
 	return box
+}
+
+// borderStyleRow picks normal (title bar), pixel or none. Unset keeps the
+// style already in the config.
+func borderStyleRow(label string, style *string) fyne.CanvasObject {
+	sel := widget.NewSelect([]string{"normal", "pixel", "none"}, nil)
+	sel.PlaceHolder = "(keep current)"
+	if *style != "" {
+		sel.SetSelected(*style)
+	}
+	sel.OnChanged = func(s string) { *style = s }
+	return container.NewGridWithColumns(2, widget.NewLabel(label), sel)
 }

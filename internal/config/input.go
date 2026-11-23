@@ -24,8 +24,8 @@ var InputTypes = []string{Keyboard, Touchpad, Pointer}
 
 func InputPath() string { return filepath.Join(SwayConfigDir(), "config.d", "input.conf") }
 
-// InputSpec describes one `input <identifier> <key> <value>` setting.
-type InputSpec struct {
+// SettingSpec describes one `input <identifier> <key> <value>` setting.
+type SettingSpec struct {
 	Key     string
 	Label   string
 	Options []string // fixed choices; nil for free-form values
@@ -33,7 +33,7 @@ type InputSpec struct {
 	valid   func(string) bool
 }
 
-func (s InputSpec) Valid(v string) bool {
+func (s SettingSpec) Valid(v string) bool {
 	if hasControlChars(v) {
 		return false
 	}
@@ -72,7 +72,7 @@ func validPositiveInt(v string) bool {
 
 // InputSpecs lists the settings the app manages for each identifier, in the
 // order they are shown and written.
-var InputSpecs = map[string][]InputSpec{
+var InputSpecs = map[string][]SettingSpec{
 	Keyboard: {
 		{Key: "xkb_layout", Label: "Layout", Hint: "us or us,de", valid: validXkb},
 		{Key: "xkb_variant", Label: "Variant", Hint: "e.g. dvorak, or ,nodeadkeys", valid: validXkb},
@@ -104,13 +104,13 @@ var InputSpecs = map[string][]InputSpec{
 	},
 }
 
-func inputSpec(ident, key string) (InputSpec, bool) {
+func inputSpec(ident, key string) (SettingSpec, bool) {
 	for _, s := range InputSpecs[ident] {
 		if s.Key == key {
 			return s, true
 		}
 	}
-	return InputSpec{}, false
+	return SettingSpec{}, false
 }
 
 func newInputMaps() map[string]map[string]string {
