@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -104,13 +105,63 @@ var InputSpecs = map[string][]SettingSpec{
 	},
 }
 
+// allInputSpecs is every input setting once, in keyboard, touchpad, pointer
+// order; device identifiers can use any of them.
+var allInputSpecs = DeviceSpecs(InputTypes)
+
+// DeviceSpecs lists the settings for a device of the given types, without
+// duplicates, in type order.
+func DeviceSpecs(types []string) []SettingSpec {
+	seen := map[string]bool{}
+	var specs []SettingSpec
+	for _, t := range types {
+		for _, s := range InputSpecs[t] {
+			if !seen[s.Key] {
+				seen[s.Key] = true
+				specs = append(specs, s)
+			}
+		}
+	}
+	return specs
+}
+
+func isTypeIdent(ident string) bool { return strings.HasPrefix(ident, "type:") }
+
+// inputSpec finds the spec for key: from the type's list for type:
+// identifiers, or from all settings for a specific device.
 func inputSpec(ident, key string) (SettingSpec, bool) {
-	for _, s := range InputSpecs[ident] {
+	list := allInputSpecs
+	if isTypeIdent(ident) {
+		list = InputSpecs[ident]
+	}
+	for _, s := range list {
 		if s.Key == key {
 			return s, true
 		}
 	}
 	return SettingSpec{}, false
+}
+
+var deviceIdentRe = regexp.MustCompile(`^[A-Za-z0-9_:./+-]+$`)
+
+// InputDevice returns the settings map for a device identifier, creating it.
+func (c *Config) InputDevice(ident string) map[string]string {
+	if c.Input[ident] == nil {
+		c.Input[ident] = map[string]string{}
+	}
+	return c.Input[ident]
+}
+
+// deviceIdents lists configured device identifiers (not type:), sorted.
+func (c *Config) deviceIdents() []string {
+	var ids []string
+	for id := range c.Input {
+		if !isTypeIdent(id) {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 func newInputMaps() map[string]map[string]string {
@@ -177,8 +228,11 @@ func parseInputEntries(lines []string) []inputEntry {
 // readInputs copies managed settings from a config file's lines into c.Input.
 func (c *Config) readInputs(lines []string) {
 	for _, e := range parseInputEntries(lines) {
+		if isTypeIdent(e.ident) && InputSpecs[e.ident] == nil {
+			continue // a type the app doesn't manage, e.g. type:tablet_tool
+		}
 		if _, ok := inputSpec(e.ident, e.key); ok {
-			c.Input[e.ident][e.key] = e.value
+			c.InputDevice(e.ident)[e.key] = e.value
 		}
 	}
 }
@@ -201,6 +255,22 @@ func (c *Config) validateInputs() error {
 			}
 		}
 	}
+	for _, id := range c.deviceIdents() {
+		used := false
+		for _, s := range allInputSpecs {
+			v := c.Input[id][s.Key]
+			if v == "" {
+				continue
+			}
+			used = true
+			if !s.Valid(v) {
+				return fmt.Errorf("input %s %s: invalid value %q", id, s.Key, v)
+			}
+		}
+		if used && !deviceIdentRe.MatchString(id) {
+			return fmt.Errorf("input identifier %q is not valid", id)
+		}
+	}
 	return nil
 }
 
@@ -220,6 +290,9 @@ func (c *Config) saveInputs() error {
 		if !e.single {
 			continue
 		}
+		if isTypeIdent(e.ident) && InputSpecs[e.ident] == nil {
+			continue
+		}
 		if _, ok := inputSpec(e.ident, e.key); !ok {
 			continue
 		}
@@ -227,7 +300,7 @@ func (c *Config) saveInputs() error {
 		if v := c.Input[e.ident][e.key]; v == "" {
 			drop[e.line] = true
 		} else {
-			lines[e.line] = leadingIndent(lines[e.line]) + fmt.Sprintf("input %s %s %s", e.ident, e.key, v)
+			lines[e.line] = leadingIndent(lines[e.line]) + fmt.Sprintf("input %s %s %s", quoteArg(e.ident), e.key, v)
 		}
 	}
 	var out []string
@@ -245,7 +318,59 @@ func (c *Config) saveInputs() error {
 			out = append(out, fmt.Sprintf("input %s %s %s", t, s.Key, v))
 		}
 	}
+	for _, id := range c.deviceIdents() {
+		for _, s := range allInputSpecs {
+			v := c.Input[id][s.Key]
+			if seen[identKey{id, s.Key}] || v == "" || v == c.inputBaseline[id][s.Key] {
+				continue
+			}
+			out = append(out, fmt.Sprintf("input %s %s %s", quoteArg(id), s.Key, v))
+		}
+	}
 	return writeLines(InputPath(), out)
+}
+
+// InputDevice is a connected input device. One identifier can be several
+// types (e.g. a keyboard with a built-in pointer).
+type InputDevice struct {
+	Identifier string
+	Name       string
+	Types      []string // managed types, e.g. type:keyboard
+}
+
+// DetectInputDevices lists connected devices of managed types, merged by
+// identifier, in the order sway reports them.
+func DetectInputDevices() ([]InputDevice, error) {
+	data, err := swayInputs()
+	if err != nil {
+		return nil, err
+	}
+	var raw []struct{ Identifier, Name, Type string }
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("parsing swaymsg output: %w", err)
+	}
+	var devices []InputDevice
+	index := map[string]int{}
+	for _, r := range raw {
+		t := "type:" + r.Type
+		if InputSpecs[t] == nil {
+			continue
+		}
+		i, ok := index[r.Identifier]
+		if !ok {
+			index[r.Identifier] = len(devices)
+			devices = append(devices, InputDevice{Identifier: r.Identifier, Name: r.Name})
+			i = len(devices) - 1
+		}
+		found := false
+		for _, x := range devices[i].Types {
+			found = found || x == t
+		}
+		if !found {
+			devices[i].Types = append(devices[i].Types, t)
+		}
+	}
+	return devices, nil
 }
 
 // swayInputs returns the raw JSON of `swaymsg -t get_inputs`. A variable so

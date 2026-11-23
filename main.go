@@ -24,7 +24,7 @@ func main() {
 
 // loadConfig reads all config files and the live sway state. Problems are
 // shown to the user; the app continues with what it could load.
-func loadConfig(w fyne.Window) (*config.Config, map[string]bool, []config.LayerSurface, error) {
+func loadConfig(w fyne.Window) *loaded {
 	cfg, err := config.Load()
 	if err != nil {
 		dialog.ShowError(fmt.Errorf("failed to load config: %w", err), w)
@@ -49,6 +49,7 @@ func loadConfig(w fyne.Window) (*config.Config, map[string]bool, []config.LayerS
 	}
 
 	layerSurfaces, layerErr := config.DetectLayerSurfaces()
+	inputDevices, inputDevErr := config.DetectInputDevices()
 
 	detected, err := config.DetectOutputs()
 	if err != nil {
@@ -56,26 +57,37 @@ func loadConfig(w fyne.Window) (*config.Config, map[string]bool, []config.LayerS
 	}
 	cfg.MergeDetected(detected)
 
-	return cfg, inputTypes, layerSurfaces, layerErr
+	return &loaded{cfg, inputTypes, inputDevices, inputDevErr, layerSurfaces, layerErr}
+}
+
+// loaded is everything the tabs are built from.
+type loaded struct {
+	cfg           *config.Config
+	inputTypes    map[string]bool
+	inputDevices  []config.InputDevice
+	inputDevErr   error
+	layerSurfaces []config.LayerSurface
+	layerErr      error
 }
 
 // showSettings loads the config and (re)builds the window's content,
 // opening on tab index selected.
 func showSettings(a fyne.App, w fyne.Window, selected int) {
-	cfg, inputTypes, layerSurfaces, layerErr := loadConfig(w)
+	l := loadConfig(w)
+	cfg := l.cfg
 
 	tabs := container.NewAppTabs(
 		container.NewTabItem("Variables", ui.MakeVariablesTab(cfg, w)),
 		container.NewTabItem("Appearance", container.NewVScroll(ui.MakeAppearanceTab(cfg, w))),
 		container.NewTabItem("Outputs", ui.MakeOutputsTab(cfg, w)),
-		container.NewTabItem("Input", ui.MakeInputTab(cfg, inputTypes)),
+		container.NewTabItem("Input", ui.MakeInputTab(cfg, l.inputTypes, l.inputDevices, l.inputDevErr)),
 		container.NewTabItem("Behavior", ui.MakeBehaviorTab(cfg, w)),
 		container.NewTabItem("Bindings", ui.MakeBindingsTab(cfg, w)),
 		container.NewTabItem("Rules", ui.MakeRulesTab(cfg, w)),
 		container.NewTabItem("Startup", ui.MakeStartupTab(cfg, w)),
 		container.NewTabItem("Bar", ui.MakeBarTab(cfg, w)),
 		container.NewTabItem("Idle", ui.MakeIdleTab(cfg, w)),
-		container.NewTabItem("Layers", ui.MakeLayersTab(cfg, w, layerSurfaces, layerErr)),
+		container.NewTabItem("Layers", ui.MakeLayersTab(cfg, w, l.layerSurfaces, l.layerErr)),
 	)
 	if selected >= 0 && selected < len(tabs.Items) {
 		tabs.SelectIndex(selected)

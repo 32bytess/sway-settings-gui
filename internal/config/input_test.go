@@ -196,3 +196,79 @@ func TestParseXkbLayouts(t *testing.T) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 }
+
+const touchpadID = "1267:12797:CUST0001:00_04F3:31FD_Touchpad"
+
+func TestDeviceInputSettingsLoadAndSave(t *testing.T) {
+	setupHome(t)
+	writeMain(t, "input \""+touchpadID+"\" {\n    tap enabled\n}\n")
+	writeInputConf(t, "input 2522:23773:COMPANY__USB_Device pointer_accel 0.5\n")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Input[touchpadID]["tap"] != "enabled" || cfg.Input["2522:23773:COMPANY__USB_Device"]["pointer_accel"] != "0.5" {
+		t.Fatalf("device settings not loaded: %v", cfg.Input)
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, InputPath()); got != "input 2522:23773:COMPANY__USB_Device pointer_accel 0.5\n" {
+		t.Fatalf("unchanged device settings rewritten: %q", got)
+	}
+	cfg.InputDevice(touchpadID)["natural_scroll"] = "enabled"
+	cfg.Input["2522:23773:COMPANY__USB_Device"]["pointer_accel"] = "-0.2"
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	want := "input 2522:23773:COMPANY__USB_Device pointer_accel -0.2\ninput " + touchpadID + " natural_scroll enabled\n"
+	if got := readFile(t, InputPath()); got != want {
+		t.Fatalf("input.conf =\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestDeviceInputValidation(t *testing.T) {
+	setupHome(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.InputDevice(touchpadID)["tap"] = "sometimes"
+	if err := cfg.Save(); err == nil {
+		t.Fatal("expected error for invalid device value")
+	}
+	cfg.InputDevice(touchpadID)["tap"] = ""
+	cfg.InputDevice(`bad"id`)["tap"] = "enabled"
+	if err := cfg.Save(); err == nil {
+		t.Fatal("expected error for invalid identifier")
+	}
+}
+
+func TestDetectInputDevices(t *testing.T) {
+	orig := swayInputs
+	t.Cleanup(func() { swayInputs = orig })
+	swayInputs = func() ([]byte, error) {
+		return []byte(`[
+			{"identifier":"1:1:AT_Translated_Set_2_keyboard","name":"AT Translated Set 2 keyboard","type":"keyboard"},
+			{"identifier":"` + touchpadID + `","name":"CUST0001:00 04F3:31FD Touchpad","type":"touchpad"},
+			{"identifier":"2522:23773:COMPANY__USB_Device","name":"COMPANY  USB Device","type":"keyboard"},
+			{"identifier":"2522:23773:COMPANY__USB_Device","name":"COMPANY  USB Device","type":"pointer"},
+			{"identifier":"1:1:AT_Translated_Set_2_keyboard","name":"AT Translated Set 2 keyboard","type":"keyboard"},
+			{"identifier":"0:5:Lid_Switch","name":"Lid Switch","type":"switch"}]`), nil
+	}
+	got, err := DetectInputDevices()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []InputDevice{
+		{Identifier: "1:1:AT_Translated_Set_2_keyboard", Name: "AT Translated Set 2 keyboard", Types: []string{Keyboard}},
+		{Identifier: touchpadID, Name: "CUST0001:00 04F3:31FD Touchpad", Types: []string{Touchpad}},
+		{Identifier: "2522:23773:COMPANY__USB_Device", Name: "COMPANY  USB Device", Types: []string{Keyboard, Pointer}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("devices =\n%+v\nwant\n%+v", got, want)
+	}
+	if specs := DeviceSpecs(want[2].Types); specs[0].Key != "xkb_layout" || specs[len(specs)-1].Key != "left_handed" {
+		t.Fatalf("DeviceSpecs order wrong: first %s last %s", specs[0].Key, specs[len(specs)-1].Key)
+	}
+}
