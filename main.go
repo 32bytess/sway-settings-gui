@@ -32,7 +32,7 @@ func main() {
 	cfg.SwayFX = swayFX
 
 	tabs := container.NewAppTabs(
-		container.NewTabItem("Variables", ui.MakeVariablesTab(cfg)),
+		container.NewTabItem("Variables", ui.MakeVariablesTab(cfg, w)),
 		container.NewTabItem("Appearance", container.NewVScroll(ui.MakeAppearanceTab(cfg))),
 		container.NewTabItem("Outputs", ui.MakeOutputsTab(cfg)),
 	)
