@@ -55,6 +55,14 @@ type Config struct {
 	WallpaperMode     string
 	mainWallpaper     string
 	mainWallpaperMode string
+	// savedWallpaper* are the values as last loaded or saved, to tell
+	// whether the user changed the wallpaper.
+	savedWallpaper     string
+	savedWallpaperMode string
+
+	// LXQtDesktop is true when pcmanfm-qt draws the desktop over sway's
+	// wallpaper; set by the caller (see LXQtDesktopRunning).
+	LXQtDesktop bool
 
 	// SwayFX reports whether the compositor accepts SwayFX-only commands
 	// (corner_radius, blur*, shadow*, dim*, titlebar_separator, ...). When false they are
@@ -153,6 +161,7 @@ func Load() (*Config, error) {
 	if err := cfg.loadOutputs(); err != nil {
 		return nil, fmt.Errorf("outputs: %w", err)
 	}
+	cfg.markWallpaperSaved()
 	return cfg, nil
 }
 
@@ -411,6 +420,7 @@ func (c *Config) Save() error {
 	if err := c.saveOutputs(); err != nil {
 		return fmt.Errorf("outputs: %w", err)
 	}
+	c.markWallpaperSaved()
 	return nil
 }
 

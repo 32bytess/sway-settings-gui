@@ -16,7 +16,6 @@ var (
 	transformOptions    = []string{"normal", "90", "180", "270", "flipped", "flipped-90", "flipped-180", "flipped-270"}
 	adaptiveSyncOptions = []string{"on", "off"}
 	scaleOptions        = []string{"1", "1.25", "1.5", "1.75", "2"}
-	imageExts           = []string{".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".svg"}
 )
 
 // wallpaperStartDir is the folder the wallpaper picker opens in: the folder
@@ -45,7 +44,7 @@ func makeWallpaperSection(cfg *config.Config, w fyne.Window) fyne.CanvasObject {
 	pathEntry.OnChanged = func(s string) { cfg.Wallpaper = s }
 
 	browse := widget.NewButton("Browse…", func() {
-		pickFile(w, wallpaperStartDir(cfg.Wallpaper), imageExts, func(path string) {
+		pickFile(w, wallpaperStartDir(cfg.Wallpaper), config.WallpaperImageExts(), func(path string) {
 			pathEntry.SetText(path)
 		})
 	})
@@ -59,13 +58,20 @@ func makeWallpaperSection(cfg *config.Config, w fyne.Window) fyne.CanvasObject {
 		modeSel.SetSelected("fill")
 	}
 
-	return container.NewVBox(
+	box := container.NewVBox(
 		widget.NewLabelWithStyle("Wallpaper (all outputs)", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		widget.NewForm(
 			widget.NewFormItem("Image", container.NewBorder(nil, nil, nil, browse, pathEntry)),
 			widget.NewFormItem("Mode", modeSel),
 		),
 	)
+	if cfg.LXQtDesktop {
+		note := widget.NewLabel("LXQt's desktop (pcmanfm-qt) is running and draws over Sway's wallpaper. " +
+			"Saving a new wallpaper here also sets it in LXQt (solid_color can't be).")
+		note.Wrapping = fyne.TextWrapWord
+		box.Add(note)
+	}
+	return box
 }
 
 // optionalSelect is a Select bound to a field where "" means "leave as is".

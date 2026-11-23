@@ -31,6 +31,12 @@ func main() {
 	}
 	cfg.SwayFX = swayFX
 
+	lxqtDesktop, err := config.LXQtDesktopRunning()
+	if err != nil {
+		dialog.ShowError(fmt.Errorf("checking for the LXQt desktop: %w", err), w)
+	}
+	cfg.LXQtDesktop = lxqtDesktop
+
 	detected, err := config.DetectOutputs()
 	if err != nil {
 		dialog.ShowError(fmt.Errorf("detecting outputs (showing configured outputs only): %w", err), w)
@@ -44,6 +50,7 @@ func main() {
 	)
 
 	saveBtn := widget.NewButton("Save & Reload Sway", func() {
+		wallpaperChanged := cfg.WallpaperChanged()
 		if err := cfg.Save(); err != nil {
 			dialog.ShowError(err, w)
 			return
@@ -52,7 +59,15 @@ func main() {
 			dialog.ShowError(fmt.Errorf("swaymsg reload: %w", err), w)
 			return
 		}
-		dialog.ShowInformation("Done", "Configuration saved and Sway reloaded.", w)
+		msg := "Configuration saved and Sway reloaded."
+		if wallpaperChanged && cfg.LXQtDesktop && cfg.Wallpaper != "" {
+			if err := config.SyncLXQtWallpaper(cfg.Wallpaper, cfg.WallpaperMode); err != nil {
+				dialog.ShowError(fmt.Errorf("saved and reloaded, but the LXQt desktop wallpaper was not changed: %w", err), w)
+				return
+			}
+			msg += "\nLXQt desktop wallpaper updated."
+		}
+		dialog.ShowInformation("Done", msg, w)
 	})
 
 	w.SetContent(container.NewBorder(nil, container.NewPadded(saveBtn), nil, nil, tabs))
