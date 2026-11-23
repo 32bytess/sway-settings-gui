@@ -280,3 +280,45 @@ func TestSaveRejectsInvalidScale(t *testing.T) {
 		}
 	}
 }
+
+func TestSaveRejectsControlCharactersAndBadFormats(t *testing.T) {
+	cases := map[string]func(*Config){
+		"newline in wallpaper": func(c *Config) { c.Wallpaper = "/a.png\nexec rm -rf ~"; c.WallpaperMode = "fill" },
+		"newline in terminal":  func(c *Config) { c.Terminal = "foot\nexec evil" },
+		"newline in menu":      func(c *Config) { c.Menu = "wofi\rexec evil" },
+		"NUL in scale":         func(c *Config) { c.Outputs = []Output{{Name: "eDP-1", Scale: "1\x00"}} },
+		"bad resolution":       func(c *Config) { c.Outputs = []Output{{Name: "eDP-1", Resolution: "big exec evil"}} },
+		"bad position":         func(c *Config) { c.Outputs = []Output{{Name: "eDP-1", Position: "0,0 exec evil"}} },
+		"bad transform":        func(c *Config) { c.Outputs = []Output{{Name: "eDP-1", Transform: "sideways"}} },
+		"bad adaptive sync":    func(c *Config) { c.Outputs = []Output{{Name: "eDP-1", AdaptiveSync: "maybe"}} },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			setupHome(t)
+			cfg, err := Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			mutate(cfg)
+			if err := cfg.Save(); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
+}
+
+func TestValidOutputFormatsAccepted(t *testing.T) {
+	setupHome(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Outputs = []Output{
+		{Name: "eDP-1", Resolution: "2560x1600@240.001Hz", Position: "0,0", Transform: "90", AdaptiveSync: "on"},
+		{Name: "DP-1", Resolution: "--custom 1920x1080@60Hz", Position: "-1920 0", Transform: "flipped-270 clockwise"},
+		{Name: "DP-2", Resolution: "1920x1080"},
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("valid outputs rejected: %v", err)
+	}
+}

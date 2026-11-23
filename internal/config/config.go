@@ -374,6 +374,11 @@ var hexColorRe = regexp.MustCompile(`^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$`)
 func ValidHexColor(s string) bool { return hexColorRe.MatchString(s) }
 
 func (c *Config) validate() error {
+	for name, v := range map[string]string{"modifier key": c.ModKey, "terminal": c.Terminal, "menu": c.Menu} {
+		if hasControlChars(v) {
+			return fmt.Errorf("%s contains control characters (e.g. a line break)", name)
+		}
+	}
 	if err := c.validateOutputs(); err != nil {
 		return err
 	}

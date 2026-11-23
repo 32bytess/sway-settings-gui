@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // Output holds the per-display settings the app manages. An empty field means
@@ -328,11 +330,39 @@ func ValidScale(s string) bool {
 	return err == nil && f > 0
 }
 
+var (
+	resolutionRe = regexp.MustCompile(`^(--custom )?\d+x\d+(@\d+(\.\d+)?Hz)?$`)
+	positionRe   = regexp.MustCompile(`^-?\d+(,| )-?\d+$`)
+	transformRe  = regexp.MustCompile(`^(normal|90|180|270|flipped|flipped-90|flipped-180|flipped-270)( (clockwise|anticlockwise))?$`)
+)
+
+// hasControlChars reports whether s contains characters (newlines, NUL, ...)
+// that would let a value spill onto a new config line.
+func hasControlChars(s string) bool {
+	return strings.IndexFunc(s, unicode.IsControl) >= 0
+}
+
 func (c *Config) validateOutputs() error {
 	for _, o := range c.Outputs {
-		if o.Scale != "" && !ValidScale(o.Scale) {
-			return fmt.Errorf("output %s: scale %q must be a positive number", o.Name, o.Scale)
+		checks := []struct {
+			name, val string
+			ok        func(string) bool
+			want      string
+		}{
+			{"resolution", o.Resolution, resolutionRe.MatchString, "WIDTHxHEIGHT[@RATEHz]"},
+			{"position", o.Position, positionRe.MatchString, "X,Y"},
+			{"scale", o.Scale, ValidScale, "a positive number"},
+			{"transform", o.Transform, transformRe.MatchString, "a sway transform"},
+			{"adaptive sync", o.AdaptiveSync, func(v string) bool { return v == "on" || v == "off" }, "on or off"},
 		}
+		for _, ch := range checks {
+			if ch.val != "" && !ch.ok(ch.val) {
+				return fmt.Errorf("output %s: %s %q must be %s", o.Name, ch.name, ch.val, ch.want)
+			}
+		}
+	}
+	if hasControlChars(c.Wallpaper) {
+		return fmt.Errorf("wallpaper path contains control characters")
 	}
 	if c.Wallpaper == "" {
 		return nil
