@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"fmt"
 	"os/exec"
 
@@ -14,8 +15,16 @@ import (
 	"sway-settings/internal/ui"
 )
 
+// appID is the Fyne app ID; sway reports it as the window's app_id, and the
+// desktop file is named after it so taskbars can match the two.
+const appID = "com.github.32bytess.sway-settings-gui"
+
+//go:embed assets/sway-settings.svg
+var iconSVG []byte
+
 func main() {
-	a := app.NewWithID("com.github.32bytess.sway-settings-gui")
+	a := app.NewWithID(appID)
+	a.SetIcon(fyne.NewStaticResource("sway-settings.svg", iconSVG))
 	w := a.NewWindow("Sway Settings")
 	// Wider than before to make room for the tab sidebar.
 	w.Resize(fyne.NewSize(780, 600))

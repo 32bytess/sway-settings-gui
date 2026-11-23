@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Sway Settings
+GenericName=Window Manager Settings
+Comment=Configure Sway and SwayFX: displays, input, appearance, key bindings and more
+Exec=sway-settings
+Icon=sway-settings
+Terminal=false
+StartupNotify=true
+StartupWMClass=com.github.32bytess.sway-settings-gui
+Categories=Settings;DesktopSettings;
+Keywords=sway;swayfx;wayland;window manager;tiling;display;keyboard;bindings;wallpaper;
