@@ -76,19 +76,20 @@ func showSettings(a fyne.App, w fyne.Window, selected int) {
 	l := loadConfig(w)
 	cfg := l.cfg
 
+	// Ordered from basics, to hardware, to look, to behaviour, to session.
 	tabs := container.NewAppTabs(
 		container.NewTabItem("Variables", ui.MakeVariablesTab(cfg, w)),
-		container.NewTabItem("Appearance", container.NewVScroll(ui.MakeAppearanceTab(cfg, w))),
 		container.NewTabItem("Outputs", ui.MakeOutputsTab(cfg, w)),
 		container.NewTabItem("Input", ui.MakeInputTab(cfg, l.inputTypes, l.inputDevices, l.inputDevErr)),
+		container.NewTabItem("Appearance", container.NewVScroll(ui.MakeAppearanceTab(cfg, w))),
+		container.NewTabItem("Layers", ui.MakeLayersTab(cfg, w, l.layerSurfaces, l.layerErr)),
 		container.NewTabItem("Behavior", ui.MakeBehaviorTab(cfg, w)),
-		container.NewTabItem("Bindings", ui.MakeBindingsTab(cfg, w)),
 		container.NewTabItem("Workspaces", ui.MakeWorkspacesTab(cfg)),
+		container.NewTabItem("Bindings", ui.MakeBindingsTab(cfg, w)),
 		container.NewTabItem("Rules", ui.MakeRulesTab(cfg, w)),
 		container.NewTabItem("Startup", ui.MakeStartupTab(cfg, w)),
 		container.NewTabItem("Bar", ui.MakeBarTab(cfg, w)),
 		container.NewTabItem("Idle", ui.MakeIdleTab(cfg, w)),
-		container.NewTabItem("Layers", ui.MakeLayersTab(cfg, w, l.layerSurfaces, l.layerErr)),
 	)
 	if selected >= 0 && selected < len(tabs.Items) {
 		tabs.SelectIndex(selected)
