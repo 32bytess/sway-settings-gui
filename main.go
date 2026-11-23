@@ -31,10 +31,16 @@ func main() {
 	}
 	cfg.SwayFX = swayFX
 
+	detected, err := config.DetectOutputs()
+	if err != nil {
+		dialog.ShowError(fmt.Errorf("detecting outputs (showing configured outputs only): %w", err), w)
+	}
+	cfg.MergeDetected(detected)
+
 	tabs := container.NewAppTabs(
 		container.NewTabItem("Variables", ui.MakeVariablesTab(cfg, w)),
 		container.NewTabItem("Appearance", container.NewVScroll(ui.MakeAppearanceTab(cfg))),
-		container.NewTabItem("Outputs", ui.MakeOutputsTab(cfg)),
+		container.NewTabItem("Outputs", ui.MakeOutputsTab(cfg, w)),
 	)
 
 	saveBtn := widget.NewButton("Save & Reload Sway", func() {

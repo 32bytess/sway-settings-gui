@@ -48,6 +48,14 @@ type Config struct {
 
 	Outputs []Output
 
+	// Wallpaper and WallpaperMode are `output * bg <file> <mode>`. The main
+	// config's value is remembered so an unchanged wallpaper isn't copied
+	// into outputs.conf.
+	Wallpaper         string
+	WallpaperMode     string
+	mainWallpaper     string
+	mainWallpaperMode string
+
 	// SwayFX reports whether the compositor accepts SwayFX-only commands
 	// (corner_radius, blur*, shadow*, dim*, titlebar_separator, ...). When false they are
 	// neither written nor kept, since plain sway rejects them.
@@ -75,13 +83,6 @@ func DetectSwayFX() (bool, error) {
 		return false, err
 	}
 	return isSwayFX(out), nil
-}
-
-type Output struct {
-	Name       string
-	Resolution string
-	Position   string
-	Transform  string
 }
 
 // SystemConfigPath is sway's system-wide default config, used when the user
@@ -181,6 +182,16 @@ func (c *Config) loadMain() error {
 		if m := regexp.MustCompile(`^set \$opacity ([0-9.]+)`).FindStringSubmatch(line); m != nil {
 			c.Opacity, _ = strconv.ParseFloat(m[1], 64)
 		}
+		// Only the wallpaper is read from the main config; per-output
+		// settings there are left to the user.
+		if ol, ok := parseOutputLine(line); ok && ol.name == "*" {
+			for _, seg := range ol.segments {
+				if canonicalKey(seg.key) == "bg" && len(seg.args) >= 2 {
+					c.Wallpaper, c.WallpaperMode = unquote(seg.args[0]), unquote(seg.args[1])
+					c.mainWallpaper, c.mainWallpaperMode = c.Wallpaper, c.WallpaperMode
+				}
+			}
+		}
 	}
 	return nil
 }
@@ -264,29 +275,6 @@ func (c *Config) loadAppearance() error {
 		if m := regexp.MustCompile(`^shadow_offset (-?\d+) (-?\d+)`).FindStringSubmatch(line); m != nil {
 			c.ShadowOffsetX, _ = strconv.Atoi(m[1])
 			c.ShadowOffsetY, _ = strconv.Atoi(m[2])
-		}
-	}
-	return nil
-}
-
-func (c *Config) loadOutputs() error {
-	data, _, err := readOptional(OutputsPath())
-	if err != nil {
-		return err
-	}
-	re := regexp.MustCompile(`^output (\S+) resolution (\S+) position (\S+)(?:\s+transform\s+(\S+))?`)
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "#") {
-			continue
-		}
-		if m := re.FindStringSubmatch(line); m != nil {
-			c.Outputs = append(c.Outputs, Output{
-				Name:       m[1],
-				Resolution: m[2],
-				Position:   m[3],
-				Transform:  m[4],
-			})
 		}
 	}
 	return nil
@@ -386,6 +374,9 @@ var hexColorRe = regexp.MustCompile(`^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$`)
 func ValidHexColor(s string) bool { return hexColorRe.MatchString(s) }
 
 func (c *Config) validate() error {
+	if err := c.validateOutputs(); err != nil {
+		return err
+	}
 	if !c.SwayFX {
 		return nil
 	}
@@ -555,44 +546,4 @@ func matchesAny(trimmed string, replacements []replacement) bool {
 		}
 	}
 	return false
-}
-
-func (o Output) line() string {
-	l := fmt.Sprintf("output %s resolution %s position %s", o.Name, o.Resolution, o.Position)
-	if o.Transform != "" {
-		l += " transform " + o.Transform
-	}
-	return l
-}
-
-func (c *Config) saveOutputs() error {
-	data, _, err := readOptional(OutputsPath())
-	if err != nil {
-		return err
-	}
-	lines := splitLines(string(data))
-	nameRe := regexp.MustCompile(`^output (\S+) resolution`)
-	written := make(map[string]bool)
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		m := nameRe.FindStringSubmatch(trimmed)
-		if m == nil {
-			continue
-		}
-		for _, out := range c.Outputs {
-			if out.Name == m[1] {
-				lines[i] = leadingIndent(line) + out.line()
-				written[out.Name] = true
-			}
-		}
-	}
-	for _, out := range c.Outputs {
-		if !written[out.Name] {
-			lines = append(lines, out.line())
-		}
-	}
-	return writeLines(OutputsPath(), lines)
 }

@@ -33,30 +33,41 @@ func replaceProgram(cmd, path string) string {
 // starting in BrowseStartDir, and substitutes it into the entry's command.
 func withBrowse(entry *widget.Entry, w fyne.Window) fyne.CanvasObject {
 	btn := widget.NewButton("Browse…", func() {
-		d := dialog.NewFileOpen(func(r fyne.URIReadCloser, err error) {
-			if err != nil {
-				dialog.ShowError(err, w)
-				return
-			}
-			if r == nil { // cancelled
-				return
-			}
-			path := r.URI().Path()
-			if err := r.Close(); err != nil {
-				dialog.ShowError(fmt.Errorf("closing %s: %w", path, err), w)
-			}
+		pickFile(w, BrowseStartDir, nil, func(path string) {
 			entry.SetText(replaceProgram(entry.Text, path))
-		}, w)
-		loc, err := storage.ListerForURI(storage.NewFileURI(BrowseStartDir))
-		if err != nil {
-			dialog.ShowError(fmt.Errorf("opening %s: %w", BrowseStartDir, err), w)
-		} else {
-			d.SetLocation(loc)
-		}
-		d.Resize(fyne.NewSize(600, 450))
-		d.Show()
+		})
 	})
 	return container.NewBorder(nil, nil, nil, btn, entry)
+}
+
+// pickFile shows a file-open dialog starting in startDir, optionally limited
+// to the given extensions, and calls onPick with the chosen path.
+func pickFile(w fyne.Window, startDir string, exts []string, onPick func(path string)) {
+	d := dialog.NewFileOpen(func(r fyne.URIReadCloser, err error) {
+		if err != nil {
+			dialog.ShowError(err, w)
+			return
+		}
+		if r == nil { // cancelled
+			return
+		}
+		path := r.URI().Path()
+		if err := r.Close(); err != nil {
+			dialog.ShowError(fmt.Errorf("closing %s: %w", path, err), w)
+		}
+		onPick(path)
+	}, w)
+	if len(exts) > 0 {
+		d.SetFilter(storage.NewExtensionFileFilter(exts))
+	}
+	loc, err := storage.ListerForURI(storage.NewFileURI(startDir))
+	if err != nil {
+		dialog.ShowError(fmt.Errorf("opening %s: %w", startDir, err), w)
+	} else {
+		d.SetLocation(loc)
+	}
+	d.Resize(fyne.NewSize(600, 450))
+	d.Show()
 }
 
 func MakeVariablesTab(cfg *config.Config, w fyne.Window) fyne.CanvasObject {
