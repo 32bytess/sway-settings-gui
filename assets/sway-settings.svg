@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <title>Sway Settings</title>
+  <!-- Background -->
+  <rect x="4" y="4" width="120" height="120" rx="24" fill="#2e3440"/>
+  <!-- Tiled windows -->
+  <rect x="16" y="16" width="46" height="96" rx="7" fill="#5e81ac"/>
+  <rect x="68" y="16" width="44" height="44" rx="7" fill="#88c0d0"/>
+  <rect x="68" y="66" width="44" height="46" rx="7" fill="#81a1c1"/>
+  <!-- Title bars -->
+  <rect x="16" y="16" width="46" height="9" rx="4" fill="#4c6a91"/>
+  <rect x="68" y="16" width="44" height="9" rx="4" fill="#6fa8b8"/>
+  <!-- Gear -->
+  <g transform="translate(88 88)">
+    <circle r="31" fill="#2e3440"/>
+    <g fill="#eceff4">
+      <rect x="-6" y="-29" width="12" height="14" rx="2"/>
+      <rect x="-6" y="-29" width="12" height="14" rx="2" transform="rotate(45)"/>
+      <rect x="-6" y="-29" width="12" height="14" rx="2" transform="rotate(90)"/>
+      <rect x="-6" y="-29" width="12" height="14" rx="2" transform="rotate(135)"/>
+      <rect x="-6" y="-29" width="12" height="14" rx="2" transform="rotate(180)"/>
+      <rect x="-6" y="-29" width="12" height="14" rx="2" transform="rotate(225)"/>
+      <rect x="-6" y="-29" width="12" height="14" rx="2" transform="rotate(270)"/>
+      <rect x="-6" y="-29" width="12" height="14" rx="2" transform="rotate(315)"/>
+      <circle r="20"/>
+    </g>
+    <circle r="8" fill="#2e3440"/>
+  </g>
+</svg>

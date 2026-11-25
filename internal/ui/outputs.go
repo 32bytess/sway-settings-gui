@@ -1,6 +1,11 @@
 package ui
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
@@ -8,42 +13,207 @@ import (
 	"sway-settings/internal/config"
 )
 
-func MakeOutputsTab(cfg *config.Config) fyne.CanvasObject {
+var (
+	transformOptions    = []string{"normal", "90", "180", "270", "flipped", "flipped-90", "flipped-180", "flipped-270"}
+	adaptiveSyncOptions = []string{"on", "off"}
+	scaleOptions        = []string{"1", "1.25", "1.5", "1.75", "2"}
+)
+
+// wallpaperStartDir is the folder the wallpaper picker opens in: the folder
+// of the current wallpaper, else the system backgrounds folder, else home.
+func wallpaperStartDir(current string) string {
+	var candidates []string
+	if current != "" {
+		candidates = append(candidates, filepath.Dir(current))
+	}
+	candidates = append(candidates, "/usr/share/backgrounds")
+	if home, err := os.UserHomeDir(); err == nil {
+		candidates = append(candidates, home)
+	}
+	for _, dir := range candidates {
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			return dir
+		}
+	}
+	return "/"
+}
+
+func makeWallpaperSection(cfg *config.Config, w fyne.Window) fyne.CanvasObject {
+	pathEntry := widget.NewEntry()
+	pathEntry.SetPlaceHolder("/path/to/image.png (or #RRGGBB for solid_color)")
+	pathEntry.SetText(cfg.Wallpaper)
+	pathEntry.OnChanged = func(s string) { cfg.Wallpaper = s }
+
+	browse := widget.NewButton("Browse…", func() {
+		pickFile(w, wallpaperStartDir(cfg.Wallpaper), config.WallpaperImageExts(), func(path string) {
+			pathEntry.SetText(path)
+		})
+	})
+
+	modeSel := widget.NewSelect(config.WallpaperModes, nil)
+	modeSel.PlaceHolder = "(mode)"
+	modeSel.SetSelected(cfg.WallpaperMode)
+	modeSel.OnChanged = func(s string) { cfg.WallpaperMode = s }
+	if cfg.WallpaperMode == "" {
+		cfg.WallpaperMode = "fill"
+		modeSel.SetSelected("fill")
+	}
+
+	box := container.NewVBox(
+		widget.NewLabelWithStyle("Wallpaper (all outputs)", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewForm(
+			widget.NewFormItem("Image", container.NewBorder(nil, nil, nil, browse, pathEntry)),
+			widget.NewFormItem("Mode", modeSel),
+		),
+	)
+	if cfg.LXQtDesktop {
+		note := widget.NewLabel("LXQt's desktop (pcmanfm-qt) is running and draws over Sway's wallpaper. " +
+			"Saving a new wallpaper here also sets it in LXQt (solid_color can't be).")
+		note.Wrapping = fyne.TextWrapWord
+		box.Add(note)
+	}
+	return box
+}
+
+// optionalSelect is a Select bound to a field where "" means "leave as is".
+// The live value is shown as a placeholder until the user picks something,
+// so untouched settings are never written.
+func optionalSelect(options []string, field *string, current string) *widget.Select {
+	sel := widget.NewSelect(options, nil)
+	if current != "" {
+		sel.PlaceHolder = "current: " + current
+	} else {
+		sel.PlaceHolder = "(not set)"
+	}
+	if *field != "" {
+		sel.SetSelected(*field)
+	}
+	sel.OnChanged = func(s string) { *field = s }
+	return sel
+}
+
+func makeOutputCard(out *config.Output) fyne.CanvasObject {
+	title := out.Name
+	d := out.Detected
+	if d != nil {
+		title = fmt.Sprintf("%s — %s %s", out.Name, d.Make, d.Model)
+	} else {
+		title += " (not connected)"
+	}
+
+	var resolution fyne.CanvasObject
+	if d != nil && len(d.Modes) > 0 {
+		modes := uniqueStrings(d.Modes)
+		if out.Resolution != "" && !contains(modes, out.Resolution) {
+			modes = append([]string{out.Resolution}, modes...)
+		}
+		resolution = optionalSelect(modes, &out.Resolution, d.CurrentMode)
+	} else {
+		e := widget.NewEntry()
+		e.SetPlaceHolder("2560x1600@60Hz")
+		e.SetText(out.Resolution)
+		e.OnChanged = func(s string) { out.Resolution = s }
+		resolution = e
+	}
+
+	position := widget.NewEntry()
+	position.SetPlaceHolder("X,Y (not set)")
+	position.SetText(out.Position)
+	position.OnChanged = func(s string) { out.Position = s }
+
+	scale := widget.NewSelectEntry(scaleOptions)
+	scale.SetPlaceHolder("(not set)")
+	if d != nil {
+		scale.SetPlaceHolder(fmt.Sprintf("current: %g", d.Scale))
+	}
+	scale.SetText(out.Scale)
+	scale.Validator = func(s string) error {
+		if s != "" && !config.ValidScale(s) {
+			return fmt.Errorf("must be a positive number")
+		}
+		return nil
+	}
+	scale.OnChanged = func(s string) { out.Scale = s }
+
+	var curTransform, curSync string
+	if d != nil {
+		curTransform, curSync = d.Transform, d.AdaptiveSync
+	}
+
+	curEnabled := ""
+	if d != nil {
+		curEnabled = "disable"
+		if d.Active {
+			curEnabled = "enable"
+		}
+	}
+	maxRender := widget.NewSelectEntry([]string{"off", "1", "2", "4", "8"})
+	maxRender.SetPlaceHolder("(not set)")
+	maxRender.SetText(out.MaxRenderTime)
+	maxRender.Validator = func(s string) error {
+		if s == "" || s == "off" {
+			return nil
+		}
+		if n, err := strconv.Atoi(s); err != nil || n <= 0 {
+			return fmt.Errorf("off or milliseconds")
+		}
+		return nil
+	}
+	maxRender.OnChanged = func(s string) { out.MaxRenderTime = s }
+
+	advanced := widget.NewForm(
+		widget.NewFormItem("Enabled", optionalSelect([]string{"enable", "disable"}, &out.Enabled, curEnabled)),
+		widget.NewFormItem("HDR", optionalSelect([]string{"on", "off"}, &out.HDR, "")),
+		widget.NewFormItem("Render bit depth", optionalSelect([]string{"6", "8", "10"}, &out.RenderBitDepth, "")),
+		widget.NewFormItem("Max render time (ms)", maxRender),
+		widget.NewFormItem("Subpixel layout", optionalSelect([]string{"rgb", "bgr", "vrgb", "vbgr", "none"}, &out.Subpixel, "")),
+		widget.NewFormItem("Scale filter", optionalSelect([]string{"linear", "nearest", "smart"}, &out.ScaleFilter, "")),
+		widget.NewFormItem("Allow tearing", optionalSelect([]string{"yes", "no"}, &out.AllowTearing, "")),
+	)
+
+	return container.NewVBox(
+		widget.NewLabelWithStyle(title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewForm(
+			widget.NewFormItem("Resolution", resolution),
+			widget.NewFormItem("Position", position),
+			widget.NewFormItem("Scale", scale),
+			widget.NewFormItem("Transform", optionalSelect(transformOptions, &out.Transform, curTransform)),
+			widget.NewFormItem("Adaptive sync", optionalSelect(adaptiveSyncOptions, &out.AdaptiveSync, curSync)),
+		),
+		widget.NewAccordion(widget.NewAccordionItem("Advanced", advanced)),
+	)
+}
+
+func MakeOutputsTab(cfg *config.Config, w fyne.Window) fyne.CanvasObject {
+	box := container.NewVBox(makeWallpaperSection(cfg, w))
 	if len(cfg.Outputs) == 0 {
-		return container.NewCenter(widget.NewLabel("No outputs found in outputs.conf"))
+		box.Add(widget.NewSeparator())
+		box.Add(widget.NewLabel("No outputs detected or configured."))
 	}
-
-	transforms := []string{"", "90", "180", "270", "flipped", "flipped-90", "flipped-180", "flipped-270"}
-
-	var rows []fyne.CanvasObject
 	for i := range cfg.Outputs {
-		out := &cfg.Outputs[i]
-
-		nameLabel := widget.NewLabelWithStyle(out.Name, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-
-		resEntry := widget.NewEntry()
-		resEntry.SetText(out.Resolution)
-		resEntry.PlaceHolder = "1920x1080"
-		resEntry.OnChanged = func(s string) { out.Resolution = s }
-
-		posEntry := widget.NewEntry()
-		posEntry.SetText(out.Position)
-		posEntry.PlaceHolder = "0,0"
-		posEntry.OnChanged = func(s string) { out.Position = s }
-
-		transformSel := widget.NewSelect(transforms, func(s string) { out.Transform = s })
-		transformSel.SetSelected(out.Transform)
-
-		rows = append(rows,
-			nameLabel,
-			widget.NewForm(
-				widget.NewFormItem("Resolution", resEntry),
-				widget.NewFormItem("Position", posEntry),
-				widget.NewFormItem("Transform", transformSel),
-			),
-			widget.NewSeparator(),
-		)
+		box.Add(widget.NewSeparator())
+		box.Add(makeOutputCard(&cfg.Outputs[i]))
 	}
+	box.Add(widget.NewSeparator())
+	box.Add(widget.NewLabel("Only settings you change (or that are already in outputs.conf) are saved."))
+	return container.NewVScroll(box)
+}
 
-	return container.NewVScroll(container.NewVBox(rows...))
+func uniqueStrings(in []string) []string {
+	var out []string
+	for _, s := range in {
+		if !contains(out, s) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func contains(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
